@@ -1,0 +1,13 @@
+include = ["**/*.toml"]
+
+exclude = [
+    "**/*nested-1000.toml",
+    "**/node_modules/**",
+    "**/invalid/*",
+    "**/.venv/**",
+    "test-data/analytics/**",
+]
+
+[formatting]
+array_auto_collapse = false
+array_auto_expand = false

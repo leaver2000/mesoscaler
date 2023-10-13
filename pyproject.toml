@@ -1,0 +1,173 @@
+# pyproject.toml is a new configuration file defined in PEP 518.
+# It is design to store build system requirements, but it can also store any
+# tool configuration for your Python project, possibly replacing the need for
+# setup.cfg or other tool-specific files.
+# https://github.com/carlosperate/awesome-pyproject
+
+[build-system]
+requires = ["setuptools", "wheel", "numpy>=1.23.4"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mesoscaler"
+version = "0.0.1"
+requires-python = ">=3.10"
+description = "TODO"
+authors = [{ name = "Jason Leaver", email = "jason.leaver@us.af.mil" }]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "Intended Audience :: End Users/Desktop",
+    "License :: OSI Approved :: MIT License",
+    "Natural Language :: English",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Topic :: Utilities",
+]
+dependencies = [
+    # -- data --
+    "numpy",
+    "xarray",
+    "zarr",
+    "dask",
+    "pandas",
+    "pyarrow",
+    "pyresample",
+    # "h5py==3.9.0",
+    # "scipy==1.11.1",
+    # -- pytorch --
+    # "torch==2.0.1",
+    # "torchvision",
+    # "timm",
+    # "tensorboard",
+    # "pytorch_lightning",
+    # "torchmetrics",
+    # "tqdm==4.65.0",
+    # -- typing --
+    "typing_extensions==4.7.1",
+    "toml",
+    # "frozenlist",
+    # - reading grib and netcdf files
+    # "netCDF4",
+    # "cfgrib",
+    # - some extraction tools
+    # "requests",
+    # "lxml",
+]
+
+[project.optional-dependencies]
+dev = [
+    # -- dev tools --
+    "mypy",
+    "pytest",
+    "ruff",
+    "black",
+    "isort",
+    "types-tqdm",
+    "types-toml",
+    "pandas-stubs",
+    "pyarrow-stubs",
+    "mypy-extensions",
+]
+ipynb = [
+    # -- ipynb --
+    "ipykernel",
+    "ipywidgets",
+    "matplotlib",
+    "cartopy",
+    "black",
+    "jupyter-black",
+]
+all = [
+    # -- dev tools --
+    "mypy",
+    "pytest",
+    "ruff",
+    "black",
+    "isort",
+    "types-tqdm",
+    "types-toml",
+    "pandas-stubs",
+    "pyarrow-stubs",
+    "mypy-extensions",
+    # -- ipynb --
+    "ipykernel",
+    "ipywidgets",
+    "matplotlib",
+    "cartopy",
+    "black",
+    "jupyter-black",
+
+]
+
+[tool.setuptools]
+include-package-data = true
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+mesoscaler = ["py.typed", "*.pyi", "**/*.pyi", "static/*", "../pyproject.toml"]
+
+[tool.mypy]
+python_version = "3.10"
+platform = "linux"
+mypy_path = "src"
+warn_unused_ignores = true
+warn_redundant_casts = true
+ignore_missing_imports = true
+enable_incomplete_feature = "TypeVarTuple,Unpack"
+
+[tool.pytest]
+testpaths = ["tests/"]
+
+[tool.coverage.run]
+branch = true
+source = ["src/mesoscaler/"]
+omit = ["src/mesoscaler/typing.py"]
+
+[tool.coverage.report]
+ignore_errors = false
+show_missing = true
+exclude_lines = [
+    # Have to re-enable the standard pragma
+    "pragma: no cover",
+    # Don't complain about missing debug-only code:s
+    # "def __repr__",
+    # "if self.debug",
+    # Don't complain if tests don't hit defensive assertion code:
+    # "raise AssertionError",
+    "raise NotImplementedError",
+    "AbstractMethodError",
+    # Don't complain if non-runnable code isn't run:
+    # "if 0:",
+    "if __name__ == .__main__.:",
+    "if TYPE_CHECKING:",
+]
+
+[tool.black]
+target-version = ['py310']
+line-length = 119
+include_trailing_comma = false
+
+[tool.isort]
+profile = "black"
+
+[tool.ruff]
+target-version = "py310"
+line-length = 119
+fix = true
+ignore = [
+    "E731", # do not assign a lambda expression, use a def
+    "E402", # module level import not at top of file
+    "E402", # module level import not at top of file
+    "E501", # line too long
+    "E741", # do not use variables named 'l', 'O', or 'I'
+    "F811",
+    "F821",
+]
+
+[tool.pyright]
+reportPrivateImportUsage = "none"
