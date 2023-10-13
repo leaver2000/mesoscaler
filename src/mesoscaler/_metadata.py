@@ -11,7 +11,6 @@ import numpy as np
 import pandas as pd
 import pyproj
 
-from .generic import Loc as _Loc
 from ._typing import (
     Any,
     Hashable,
@@ -20,10 +19,10 @@ from ._typing import (
     Mapping,
     MutableMapping,
     NamedTuple,
-    Self,
     TypeAlias,
     TypeVar,
 )
+from .generic import Loc as _Loc
 from .utils import is_scalar, join_kv
 
 LOC = "__mesometa_loc__"

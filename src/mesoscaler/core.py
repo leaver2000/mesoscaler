@@ -9,6 +9,28 @@ import pyresample.geometry
 import xarray as xr
 from xarray.core.coordinates import DatasetCoordinates
 
+from ._typing import (
+    N2,
+    N4,
+    Any,
+    Array,
+    Callable,
+    Final,
+    Hashable,
+    Iterable,
+    Iterator,
+    ListLike,
+    Literal,
+    Mapping,
+    N,
+    NDArray,
+    Number,
+    Self,
+    Sequence,
+    Slice,
+    TypeAlias,
+    Union,
+)
 from .enums import (
     DIMENSIONS,
     LAT,
@@ -24,30 +46,6 @@ from .enums import (
     Z,
 )
 from .generic import Data
-
-
-from ._typing import (
-    N2,
-    N4,
-    Iterable,
-    ListLike,
-    Sequence,
-    Any,
-    Array,
-    Callable,
-    Final,
-    Hashable,
-    Iterator,
-    Literal,
-    Mapping,
-    N,
-    NDArray,
-    Number,
-    Self,
-    Slice,
-    TypeAlias,
-    Union,
-)
 from .utils import log_scale, sort_unique
 
 AreaExtent: TypeAlias = Array[[N4], np.float_]
