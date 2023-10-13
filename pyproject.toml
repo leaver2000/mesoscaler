@@ -27,7 +27,6 @@ classifiers = [
     "Topic :: Utilities",
 ]
 dependencies = [
-    # -- data --
     "numpy",
     "xarray",
     "zarr",
@@ -35,26 +34,8 @@ dependencies = [
     "pandas",
     "pyarrow",
     "pyresample",
-    # "h5py==3.9.0",
-    # "scipy==1.11.1",
-    # -- pytorch --
-    # "torch==2.0.1",
-    # "torchvision",
-    # "timm",
-    # "tensorboard",
-    # "pytorch_lightning",
-    # "torchmetrics",
-    # "tqdm==4.65.0",
-    # -- typing --
     "typing_extensions==4.7.1",
     "toml",
-    # "frozenlist",
-    # - reading grib and netcdf files
-    # "netCDF4",
-    # "cfgrib",
-    # - some extraction tools
-    # "requests",
-    # "lxml",
 ]
 
 [project.optional-dependencies]
