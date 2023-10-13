@@ -25,7 +25,6 @@ from ._typing import (
     Self,
     TypeVar,
     overload,
-    ListLike,
 )
 from .utils import is_array_like, join_kv
 

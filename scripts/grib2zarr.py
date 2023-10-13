@@ -1,13 +1,15 @@
 """
 convert grib2 data to .zarr store
 """
+assert False, "TODO: this script is not yet ready for use"
 import glob
 import os
 
 import tqdm
 import xarray as xr
-from src.mesoscaler.generic import CFDatasetEnum
-from src.mesoscaler.datasets.urma.constants import (
+
+from mesoscaler.enums import (
+    URMA,
     CEILING,
     DEWPOINT_TEMPERATURE_2M,
     SPECIFIC_HUMIDITY_2M,
@@ -38,7 +40,7 @@ DEFAULT_VARIABLES = [
 ]
 
 
-def open_mfdataset(files: list[str], variables: list[CFDatasetEnum]):
+def open_mfdataset(files: list[str], variables: list[URMA]):
     """
     Wraps the xr.open_mfdataset function to filter by type of level and level.
     This is necessary for many of the NDFD datasets, which use inconsistent

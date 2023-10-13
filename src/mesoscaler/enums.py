@@ -57,6 +57,10 @@ class ERA5(DependentVariables):
     V = auto_field("v_component_of_wind", aliases=["v"], units="m s**-1")
     W = auto_field("vertical_velocity", aliases=["w"], units="Pa s**-1")
 
+    @property
+    def units(self) -> str:
+        return self.metadata["units"]
+
 
 ERA5_VARS = (
     GEOPOTENTIAL,
@@ -94,19 +98,27 @@ class URMA(DependentVariables):
     | OROG          | orog         | orography               | surface orography            | surface               | m           |
     """
 
-    TCC = "total_cloud_cover"
-    CEIL = "ceiling"
-    U10 = "u_wind_component_10m"
-    V10 = "v_wind_component_10m"
-    SI10 = "wind_speed_10m"
-    GUST = "wind_speed_gust"
-    WDIR10 = "wind_direction_10m"
-    T2M = "temperature_2m"
-    D2M = "dewpoint_temperature_2m"
-    SH2 = "specific_humidity_2m"
-    SP = "surface_pressure"
-    VIS = "visibility"
-    OROG = "orography"
+    TCC = auto_field("total_cloud_cover", units="%", type_of_level="atmosphereSingleLayer")
+    CEIL = auto_field("ceiling", units="m", type_of_level="cloudCeiling")
+    U10 = auto_field("u_wind_component_10m", units="m s**-1", type_of_level="heightAboveGround")
+    V10 = auto_field("v_wind_component_10m", units="m s**-1", type_of_level="heightAboveGround")
+    SI10 = auto_field("wind_speed_10m", units="m s**-1", type_of_level="heightAboveGround")
+    GUST = auto_field("wind_speed_gust", units="m s**-1", type_of_level="heightAboveGround")
+    WDIR10 = auto_field("wind_direction_10m", units="Degree true", type_of_level="heightAboveGround")
+    T2M = auto_field("temperature_2m", units="K", type_of_level="heightAboveGround")
+    D2M = auto_field("dewpoint_temperature_2m", units="K", type_of_level="heightAboveGround")
+    SH2 = auto_field("specific_humidity_2m", units="kg kg**-1", type_of_level="heightAboveGround")
+    SP = auto_field("surface_pressure", units="Pa", type_of_level="surface")
+    VIS = auto_field("visibility", units="m", type_of_level="surface")
+    OROG = auto_field("orography", units="m", type_of_level="surface")
+
+    @property
+    def units(self) -> str:
+        return self.metadata["units"]
+
+    @property
+    def type_of_level(self) -> str:
+        return self.metadata["type_of_level"]
 
 
 URMA_VARS = (

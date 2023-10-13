@@ -67,10 +67,14 @@ if typing.TYPE_CHECKING:
     N3 = NewType("3", Any)
     N4 = NewType("4", Any)
 
-    ArrayLike: TypeAlias = Union[ExtensionArray, np.ndarray[Any, _T_co]]
+    ArrayLike: TypeAlias = Union[np.ndarray[Any, _T_co], ExtensionArray]
     PandasArrayLike: TypeAlias = Union[pd.Index[_T_co], pd.Series[_T_co]]
-    AnyArrayLike: TypeAlias = Union[ArrayLike[NumpyDType_T], PandasArrayLike[PandasDType_T], list[PandasDType_T]]  # type: ignore
-    _ListLike = Union[AnyArrayLike[_T_contra, _T_contra], list[_T_contra]]
+    AnyArrayLike: TypeAlias = Union[
+        np.ndarray[Any, _T_contra],
+        PandasArrayLike[PandasDType_T],
+        list[PandasDType_T],
+    ]
+    _ListLike = Union[AnyArrayLike[_T_contra], list[_T_contra]]
     ListLike: TypeAlias = _ListLike[_T | Any]
 
 

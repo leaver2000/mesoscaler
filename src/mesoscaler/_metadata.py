@@ -20,6 +20,7 @@ from ._typing import (
     Mapping,
     MutableMapping,
     NamedTuple,
+    Self,
     TypeAlias,
     TypeVar,
 )
@@ -173,7 +174,7 @@ class _EnumMetaCls(enum.EnumMeta):
         return cls.__metadata__[CLASS_METADATA]
 
     @property
-    def loc(cls) -> _Loc[str | bool | slice, list["VariableEnum"]]:
+    def loc(cls) -> _Loc[list[VariableEnum]]:
         return cls.__metadata__[LOC]
 
     @property
