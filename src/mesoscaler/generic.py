@@ -87,9 +87,9 @@ class Data(NamedAndSized, Generic[_T], abc.ABC):
         return dict(self.data)
 
 
-class MappingBase(Data[_T], Mapping[HashableT, _T], abc.ABC):
+class MappingBase(Mapping[HashableT, _T], Data[_T], abc.ABC):
     @property
-    def data(self) -> Iterable[tuple[Hashable, _T]]:
+    def data(self) -> Iterable[tuple[HashableT, _T]]:
         return self.items()
 
 
@@ -157,29 +157,6 @@ class ChainDataset(IterableDataset[_T_co]):
 
 
 # =====================================================================================================================
-_AnyArrayLikeT = TypeVar("_AnyArrayLikeT", bound=AnyArrayLike)
-
-
-class Loc(Generic[_AnyArrayLikeT]):
-    def __init__(
-        self,
-        hook: Callable[[AnyArrayLike[NumpyDType_T, PandasDType_T]], _AnyArrayLikeT],
-        data: AnyArrayLike[NumpyDType_T, PandasDType_T],
-    ) -> None:
-        self._hook = hook
-        self._data = data
-
-    @overload
-    def __getitem__(self, item: list) -> PandasDType_T | NumpyDType_T:  # pyright: ignore
-        ...
-
-    @overload
-    def __getitem__(self, item: Any) -> _AnyArrayLikeT:
-        ...
-
-    def __getitem__(self, item: Any) -> _AnyArrayLikeT | PandasDType_T | NumpyDType_T:  # type: ignore
-        x = self._data[item]
-        return self._hook(x) if is_array_like(x) else x
 
 
 class DataMapping(MappingBase[HashableT, _T]):
@@ -196,18 +173,9 @@ class DataMapping(MappingBase[HashableT, _T]):
     def __len__(self) -> int:
         return len(self._data)
 
-    def __repr__(self) -> str:
-        return join_kv(self.__class__, *self.items())
 
-
-class DataMutableMapping(MutableMapping[HashableT, _T], DataMapping[HashableT, _T]):
-    def __setitem__(self, key: HashableT, value: _T) -> None:
-        self._data[key] = value
-
-    def __delitem__(self, key: HashableT) -> None:
-        del self._data[key]
-
-
+# =====================================================================================================================
+#
 # =====================================================================================================================
 class DataWorker(MappingBase[HashableT, _T]):
     __slots__ = ("indices", "config")
@@ -246,14 +214,14 @@ class DataWorker(MappingBase[HashableT, _T]):
 class DataConsumer(IterableDataset[_T], Generic[HashableT, _T]):
     def __init__(self, worker: DataWorker[HashableT, _T], *, maxsize: int = 0, timeout: float | None = None) -> None:
         super().__init__()
-        self.thread = threading.Thread(target=self._target, name=self.name, daemon=True)
-        self.queue = queue.Queue[_T](maxsize=maxsize)
-        self.worker = worker
-        self.timeout = timeout
+        self.thread: Final[threading.Thread] = threading.Thread(target=self._target, name=self.name, daemon=True)
+        self.queue: Final[queue.Queue[_T]] = queue.Queue[_T](maxsize=maxsize)
+        self.worker: Final[DataWorker[HashableT, _T]] = worker
+        self.timeout: Final[float | None] = timeout
 
     def _target(self) -> None:
-        for index in self.worker.keys():
-            self.queue.put(self.worker[index], block=True, timeout=self.timeout)
+        for idx in self.worker.keys():
+            self.queue.put(self.worker[idx], block=True, timeout=self.timeout)
 
     def __len__(self) -> int:
         return len(self.worker)
@@ -269,3 +237,31 @@ class DataConsumer(IterableDataset[_T], Generic[HashableT, _T]):
         self.worker.start()
         self.thread.start()
         return self
+
+
+# =====================================================================================================================
+#
+# =====================================================================================================================
+_AnyArrayLikeT = TypeVar("_AnyArrayLikeT", bound=AnyArrayLike)
+
+
+class Loc(Generic[_AnyArrayLikeT]):
+    def __init__(
+        self,
+        hook: Callable[[AnyArrayLike[NumpyDType_T, PandasDType_T]], _AnyArrayLikeT],
+        data: AnyArrayLike[NumpyDType_T, PandasDType_T],
+    ) -> None:
+        self._hook = hook
+        self._data = data
+
+    @overload
+    def __getitem__(self, item: list) -> PandasDType_T | NumpyDType_T:  # pyright: ignore
+        ...
+
+    @overload
+    def __getitem__(self, item: Any) -> _AnyArrayLikeT:
+        ...
+
+    def __getitem__(self, item: Any) -> _AnyArrayLikeT | PandasDType_T | NumpyDType_T:  # type: ignore
+        x = self._data[item]
+        return self._hook(x) if is_array_like(x) else x
