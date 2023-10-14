@@ -345,6 +345,9 @@ class Mesoscale(Data[NDArray[np.float_]]):
     def __array__(self) -> Array[[N, N2], np.float_]:
         return self.to_numpy()
 
+    def __len__(self) -> int:
+        return len(self.hpa)
+
     def to_pandas(self) -> pd.DataFrame:
         return pd.DataFrame(self.to_dict()).set_index("hpa").sort_index()
 

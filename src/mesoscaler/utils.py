@@ -45,7 +45,6 @@ from ._typing import (
     AnyArrayLike,
     Array,
     Callable,
-    Final,
     Hashable,
     Iterable,
     Iterator,
@@ -66,10 +65,10 @@ from ._typing import (
 _T1 = TypeVar("_T1", bound=Any)
 _T2 = TypeVar("_T2")
 
-_NoDefault = enum.Enum("_NoDefault", "NoDefault")
-NO_DEFAULT = _NoDefault.NoDefault
-NoDefault = Literal[_NoDefault.NoDefault]
-del _NoDefault
+__NoDefault = enum.Enum("", "NoDefault")
+NoDefault = __NoDefault.NoDefault
+LiteralNoDefault = Literal[__NoDefault.NoDefault]
+del __NoDefault
 
 
 def is_ipython() -> bool:
@@ -304,7 +303,12 @@ def arange_slice(
 # =====================================================================================================================
 # - iterable utils
 # =====================================================================================================================
-max_len: Final[Callable[[Iterable[Sized]], int]] = lambda x: max(map(len, x))
+SizedIterFunc = Callable[[Iterable[Sized]], _T1]
+map_size: SizedIterFunc[map[int]] = lambda x: map(len, x)
+acc_size: SizedIterFunc[itertools.accumulate[int]] = lambda x: itertools.accumulate(map_size(x))
+max_size: SizedIterFunc[int] = lambda x: max(map_size(x))
+min_size: SizedIterFunc[int] = lambda x: min(map_size(x))
+sum_size: SizedIterFunc[int] = lambda x: sum(map_size(x))
 
 
 @overload
@@ -317,11 +321,13 @@ def find(__func: Callable[[_T1], bool], __x: Iterable[_T1], /, *, default: _T2) 
     ...
 
 
-def find(__func: Callable[[_T1], bool], __x: Iterable[_T1], /, *, default: _T2 | NoDefault = NO_DEFAULT) -> _T1 | _T2:
+def find(
+    __func: Callable[[_T1], bool], __x: Iterable[_T1], /, *, default: _T2 | LiteralNoDefault = NoDefault
+) -> _T1 | _T2:
     try:
         return next(filter(__func, __x))
     except StopIteration as e:
-        if default is not NO_DEFAULT:
+        if default is not NoDefault:
             return default
         raise ValueError(f"no element in {__x} satisfies {__func}") from e
 
