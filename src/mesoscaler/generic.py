@@ -26,14 +26,23 @@ from ._typing import (
     Sized,
     TypeVar,
     overload,
+    Unpack,
+    TypeVarTuple,
+    get_first_order_generic,
 )
 from .utils import acc_size, is_array_like, join_kv
 
 _T = TypeVar("_T")
-_T_co = TypeVar("_T_co", covariant=True)
+_Ts = TypeVarTuple("_Ts")
 
 
-class NamedAndSized(Sized, abc.ABC):
+class NamedAndSized(Sized, Generic[Unpack[_Ts]], abc.ABC):
+    __slots__ = ()
+    __first_order_generics__: tuple[type, ...]
+
+    def __init_subclass__(cls) -> None:
+        cls.__first_order_generics__ = get_first_order_generic(cls)
+
     @property
     def name(self) -> str:
         return self.__class__.__name__
@@ -46,7 +55,7 @@ class NamedAndSized(Sized, abc.ABC):
 # =====================================================================================================================
 #
 # =====================================================================================================================
-class Data(NamedAndSized, Generic[_T], abc.ABC):
+class Data(NamedAndSized[_T], abc.ABC):
     """
     ```
     >>> class MyData(Data[int]):
@@ -78,13 +87,17 @@ class Data(NamedAndSized, Generic[_T], abc.ABC):
         ...
 
     def __repr__(self) -> str:
-        return join_kv(self.__class__, *self.data)
+        name = self.name
+        data = self.data
+        size = self.size
+        text = join_kv(f"{name}({size=}):", *data, start=0, stop=5)
+        return text
 
     def to_dict(self) -> dict[Hashable, _T]:
         return dict(self.data)
 
 
-class MappingBase(Mapping[HashableT, _T], Data[_T], abc.ABC):
+class MappingBase(NamedAndSized, Mapping[HashableT, _T], abc.ABC):
     @property
     def data(self) -> Iterable[tuple[HashableT, _T]]:
         return self.items()
@@ -93,17 +106,17 @@ class MappingBase(Mapping[HashableT, _T], Data[_T], abc.ABC):
 # =====================================================================================================================
 #
 # =====================================================================================================================
-class Dataset(NamedAndSized, Generic[_T_co], abc.ABC):
+class Dataset(NamedAndSized[_T], abc.ABC):
     @abc.abstractmethod
-    def __getitem__(self, index: int) -> _T_co:
+    def __getitem__(self, index: int) -> _T:
         ...
 
-    def __add__(self, other: Dataset[_T_co]) -> ConcatDataset[_T_co]:
+    def __add__(self, other: Dataset[_T]) -> ConcatDataset[_T]:
         return ConcatDataset([self, other])
 
 
-class ConcatDataset(Dataset[_T_co]):
-    def __init__(self, data: Iterable[Dataset[_T_co]]) -> None:
+class ConcatDataset(Dataset[_T]):
+    def __init__(self, data: Iterable[Dataset[_T]]) -> None:
         super().__init__()
         self.data = data = list(data)
         if not data:
@@ -117,36 +130,36 @@ class ConcatDataset(Dataset[_T_co]):
     def __len__(self) -> int:
         return self.accumulated_sizes[-1]
 
-    def __getitem__(self, idx: int) -> _T_co:
+    def __getitem__(self, idx: int) -> _T:
         if idx < 0:
             if -idx > len(self):
                 raise ValueError("absolute value of index should not exceed dataset length")
             idx += len(self)
 
-        if dataset_idx := bisect.bisect_right(self.accumulated_sizes, idx):
-            idx -= self.accumulated_sizes[dataset_idx - 1]
+        if ds_idx := bisect.bisect_right(self.accumulated_sizes, idx):
+            idx -= self.accumulated_sizes[ds_idx - 1]
 
-        return self.data[dataset_idx][idx]
+        return self.data[ds_idx][idx]
 
 
 # =====================================================================================================================
 #
 # =====================================================================================================================
-class IterableDataset(NamedAndSized, Generic[_T_co], abc.ABC):
+class IterableDataset(NamedAndSized[_T], abc.ABC):
     @abc.abstractmethod
-    def __iter__(self) -> Iterator[_T_co]:
+    def __iter__(self) -> Iterator[_T]:
         ...
 
-    def __add__(self, other: IterableDataset[_T_co]) -> ChainDataset[_T_co]:
+    def __add__(self, other: IterableDataset[_T]) -> ChainDataset[_T]:
         return ChainDataset([self, other])
 
 
-class ChainDataset(IterableDataset[_T_co]):
-    def __init__(self, datasets: Iterable[IterableDataset[_T_co]]) -> None:
+class ChainDataset(IterableDataset[_T]):
+    def __init__(self, datasets: Iterable[IterableDataset[_T]]) -> None:
         super().__init__()
         self.data = datasets
 
-    def __iter__(self) -> Iterator[_T_co]:
+    def __iter__(self) -> Iterator[_T]:
         return itertools.chain.from_iterable(self.data)
 
     def __len__(self) -> int:
@@ -154,8 +167,8 @@ class ChainDataset(IterableDataset[_T_co]):
 
 
 # =====================================================================================================================
-
-
+# - Mappings
+# =====================================================================================================================
 class DataMapping(MappingBase[HashableT, _T]):
     def __init__(self, data: Mapping[HashableT, _T]) -> None:
         super().__init__()
@@ -171,16 +184,15 @@ class DataMapping(MappingBase[HashableT, _T]):
         return len(self._data)
 
 
-# =====================================================================================================================
-#
-# =====================================================================================================================
 class DataWorker(MappingBase[HashableT, _T]):
-    __slots__ = ("indices", "config")
-
-    def __init__(self, *, indices: Iterable[HashableT], **config: Any) -> None:
+    def __init__(self, indices: Iterable[HashableT], **config: Any) -> None:
         super().__init__()
         self.indices: Final[list[HashableT]] = list(indices)
         self.config: Final[DictStrAny] = config
+
+    @abc.abstractmethod
+    def __getitem__(self, key: HashableT) -> _T:
+        ...
 
     def __len__(self) -> int:
         return len(self.indices)
@@ -188,19 +200,29 @@ class DataWorker(MappingBase[HashableT, _T]):
     def __iter__(self) -> Iterator[HashableT]:
         return iter(self.indices)
 
-    @abc.abstractmethod
-    def __getitem__(self, key: HashableT) -> _T:
-        ...
+    def __repr__(self) -> str:
+        name = self.name
+        # data = self.data
+        size = self.size
+        data_name = self.__first_order_generics__[-1]
+        text = join_kv(f"{name}({size=}):", *zip(self.indices, itertools.repeat(data_name)), start=0, stop=5)
+        return text
 
-    @abc.abstractmethod
-    def start(self) -> None:
-        ...
+    @property
+    def name(self) -> str:
+        name = super().name
+        if split_name := self.config.get("split_name", None):
+            name += f"[{split_name}]"
+        return name
 
-    def split(self, frac: float = 0.8) -> tuple[Self, Self]:
+    def split(self, frac: float = 0.8, split_names=("train", "test")) -> tuple[Self, Self]:
         cls = type(self)
         n = int(len(self) * frac)
         left, right = self.indices[:n], self.indices[n:]
-        return cls(indices=left, **self.config), cls(indices=right, **self.config)
+        return (
+            cls(indices=left, **self.config | {"split_name": split_names[0]}),
+            cls(indices=right, **self.config | {"split_name": split_names[1]}),
+        )
 
     def shuffle(self, *, seed: int) -> Self:
         random.seed(seed)
@@ -208,12 +230,17 @@ class DataWorker(MappingBase[HashableT, _T]):
         return self
 
 
+# =====================================================================================================================
+#
+# =====================================================================================================================
+
+
 class DataConsumer(IterableDataset[_T], Generic[HashableT, _T]):
-    def __init__(self, worker: DataWorker[HashableT, _T], *, maxsize: int = 0, timeout: float | None = None) -> None:
+    def __init__(self, worker: Mapping[HashableT, _T], *, maxsize: int = 0, timeout: float | None = None) -> None:
         super().__init__()
         self.thread: Final[threading.Thread] = threading.Thread(target=self._target, name=self.name, daemon=True)
         self.queue: Final[queue.Queue[_T]] = queue.Queue[_T](maxsize=maxsize)
-        self.worker: Final[DataWorker[HashableT, _T]] = worker
+        self.worker: Final[Mapping[HashableT, _T]] = worker
         self.timeout: Final[float | None] = timeout
 
     def _target(self) -> None:
@@ -231,7 +258,6 @@ class DataConsumer(IterableDataset[_T], Generic[HashableT, _T]):
         return (self.queue.get(block=True, timeout=self.timeout) for _ in range(len(self)))
 
     def start(self):
-        self.worker.start()
         self.thread.start()
         return self
 

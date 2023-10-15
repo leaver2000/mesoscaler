@@ -120,12 +120,14 @@ elif sys.version_info >= (3, 10):
 else:
     from types import EllipsisType
     from typing import ParamSpec, Self, TypeAlias, TypeVarTuple, Unpack
+import types
 
+Undefined = types.new_class("Undefined")
 # =====================================================================================================================
 _P = ParamSpec("_P")
 _T = TypeVar("_T", bound=Any)
 _T_co = TypeVar("_T_co", bound=Any, covariant=True)
-
+_Ts = TypeVarTuple("_Ts")
 NumberT = TypeVar("NumberT", bound="Number")
 HashableT = TypeVar("HashableT", bound=Hashable)
 
@@ -154,6 +156,17 @@ MaskType: TypeAlias = Union["pd.Series[bool]", "NDArray[np.bool_]", list[bool]]
 # =====================================================================================================================
 # - Protocols
 # =====================================================================================================================
+
+
+def get_first_order_generic(obj: Any, default=(Undefined,)) -> tuple[type, ...]:
+    for arg in getattr(obj, "__orig_bases__", []):
+        types_ = getattr(arg, "__args__", (Undefined,))
+        if getattr(types_[0], "__origin__", None) is not None:
+            return types_
+
+    return default
+
+
 class SliceLike(Protocol[_T_co]):
     @property
     def start(self) -> _T_co:

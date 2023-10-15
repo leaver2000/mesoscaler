@@ -285,8 +285,10 @@ class Mesoscale(Data[NDArray[np.float_]]):
     ) -> None:
         super().__init__()
         # descending pressure
-        tropo = sort_unique(self._arange() if troposphere is None else troposphere, descending=True).astype(np.float_)
-        self._hpa = hpa = sort_unique(pressure, descending=True).astype(np.float_)
+        tropo = np.asarray(
+            sort_unique(self._arange() if troposphere is None else troposphere, descending=True), dtype=np.float_
+        )
+        self._hpa = hpa = np.asarray(sort_unique(pressure, descending=True), dtype=np.float_)
         if not all(np.isin(hpa, tropo)):
             raise ValueError(f"pressure {hpa} must be a subset of troposphere {tropo}")
 

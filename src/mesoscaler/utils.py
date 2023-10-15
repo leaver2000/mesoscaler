@@ -115,7 +115,7 @@ def is_array_like(x: Any) -> TypeGuard[AnyArrayLike]:
 # =====================================================================================================================
 # - array/tensor utils
 # =====================================================================================================================
-TensorT = TypeVar("TensorT", Tensor, Array[..., Any])
+TensorT = TypeVar("TensorT", Tensor, Array[[...], Any])
 
 
 def normalize(x: TensorT) -> TensorT:
@@ -261,14 +261,27 @@ def _repr_generator(*args: tuple[str, Any]):
         yield f"{key}{value}"
 
 
-def join_kv(head: tuple[Hashable, Any] | str | type, *args: tuple[Hashable, Any], sep="\n") -> str:
+def join_kv(
+    head: tuple[Hashable, Any] | str | type,
+    *args: tuple[Hashable, Any],
+    sep="\n",
+    start: int | LiteralNoDefault = NoDefault,
+    stop: int | LiteralNoDefault = NoDefault,
+) -> str:
     if isinstance(head, tuple):
         args = (head, *args)
         head = ""
+
     elif isinstance(head, type):
         head = f"{head.__name__}:"
+    if start is not NoDefault and stop is not NoDefault:
+        text = sep.join(_repr_generator(*((str(k), v) for k, v in args[start:stop])))
+        text += "\n...\n"
+        k, v = args[-1]
+        text += sep.join(_repr_generator((str(k), v)))
 
-    text = sep.join(_repr_generator(*((str(k), v) for k, v in args)))
+    else:
+        text = sep.join(_repr_generator(*((str(k), v) for k, v in args)))
     return sep.join([head, text])
 
 

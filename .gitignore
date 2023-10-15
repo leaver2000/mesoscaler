@@ -161,8 +161,9 @@ cython_debug/
 # vscode
 .vscode/
 
-# snakemake
+
 .snakemake/
 .trash/
 logs/
 *.zarr/**/*
+scratchpad.ipynb
