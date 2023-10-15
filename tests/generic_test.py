@@ -1,6 +1,6 @@
 import typing
 
-from src.mesoscaler.generic import Dataset, DataMapping
+from src.mesoscaler.generic import DataMapping, Dataset
 
 
 class MyDataset(Dataset[int]):

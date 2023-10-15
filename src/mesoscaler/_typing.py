@@ -120,9 +120,11 @@ elif sys.version_info >= (3, 10):
 else:
     from types import EllipsisType
     from typing import ParamSpec, Self, TypeAlias, TypeVarTuple, Unpack
+
+import enum
 import types
 
-Undefined = types.new_class("Undefined")
+Undefined = enum.Enum("Undefined", names="_", module=__name__)
 # =====================================================================================================================
 _P = ParamSpec("_P")
 _T = TypeVar("_T", bound=Any)
@@ -158,11 +160,23 @@ MaskType: TypeAlias = Union["pd.Series[bool]", "NDArray[np.bool_]", list[bool]]
 # =====================================================================================================================
 
 
-def get_first_order_generic(obj: Any, default=(Undefined,)) -> tuple[type, ...]:
+def get_first_order_generic(obj: Any, default=(Undefined,)) -> tuple[types.GenericAlias, ...] | tuple[Undefined]:
     for arg in getattr(obj, "__orig_bases__", []):
-        types_ = getattr(arg, "__args__", (Undefined,))
-        if getattr(types_[0], "__origin__", None) is not None:
-            return types_
+        types_ = getattr(arg, "__args__", None)
+        if types_ is None:
+            return default
+        # print(types_)
+        # origin = getattr(types_[0], "__origin__", None)
+        return types_
+        # if origin is not None:
+        #     print(origin)
+        #     return types_
+        # else:
+        #     ...
+        # print(types_)
+        # return types_
+        # if getattr(types_[0], "__origin__", None) is not None:
+        #     return types_
 
     return default
 

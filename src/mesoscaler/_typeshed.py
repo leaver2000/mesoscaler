@@ -10,10 +10,9 @@ __all__ = [
     "NestedSequence",
     "TensorLike",
 ]
-import typing
-
 # if typing.TYPE_CHECKING:
 import datetime
+import typing
 from typing import Any, Concatenate, NewType, ParamSpec, TypeAlias, TypeVar, Union
 
 import numpy as np
