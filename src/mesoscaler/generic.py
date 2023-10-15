@@ -7,28 +7,25 @@ import itertools
 import queue
 import random
 import threading
-from typing import (
+
+from ._typing import (
     Any,
+    AnyArrayLike,
     Callable,
+    DictStrAny,
     Final,
     Generic,
     Hashable,
+    HashableT,
     Iterable,
     Iterator,
     Mapping,
-    MutableMapping,
-    Sized,
-    TypeVar,
-    overload,
-)
-
-from ._typing import (
-    AnyArrayLike,
-    DictStrAny,
-    HashableT,
     NumpyDType_T,
     PandasDType_T,
     Self,
+    Sized,
+    TypeVar,
+    overload,
 )
 from .utils import acc_size, is_array_like, join_kv
 

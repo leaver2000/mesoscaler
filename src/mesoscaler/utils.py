@@ -53,6 +53,7 @@ from ._typing import (
     Mapping,
     N,
     NDArray,
+    NumberT,
     Pair,
     Sequence,
     Sized,
@@ -158,7 +159,7 @@ def log_scale(x: NDArray[np.number], rate: float = 1.0) -> NDArray[np.float_]:
     return normalized_scale(np.log(x), rate=rate)
 
 
-def sort_unique(x: ListLike[_T1], descending=False) -> NDArray[_T1]:
+def sortunique(x: ListLike[_T1], descending=False) -> NDArray[_T1]:
     """
     Sorts the elements of the input array `x` in ascending order and removes any duplicates.
 
@@ -269,6 +270,10 @@ def join_kv(head: tuple[Hashable, Any] | str | type, *args: tuple[Hashable, Any]
 
     text = sep.join(_repr_generator(*((str(k), v) for k, v in args)))
     return sep.join([head, text])
+
+
+def sort_unique(x: Iterable[NumberT], descending=False) -> list[NumberT]:
+    return sorted(set(x), reverse=descending)  # type: ignore
 
 
 # =====================================================================================================================

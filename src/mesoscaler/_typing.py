@@ -126,6 +126,7 @@ _P = ParamSpec("_P")
 _T = TypeVar("_T", bound=Any)
 _T_co = TypeVar("_T_co", bound=Any, covariant=True)
 
+NumberT = TypeVar("NumberT", bound="Number")
 HashableT = TypeVar("HashableT", bound=Hashable)
 
 # - builtins
@@ -137,9 +138,10 @@ DictStrAny: TypeAlias = DictStr[Any]
 StrPath: TypeAlias = "str | os.PathLike[str]"
 
 # - numpy
-Number: TypeAlias = int | float | np.number[Any]
+Int: TypeAlias = int | np.integer[Any]
+Float: TypeAlias = float | np.floating[Any]
+Number: TypeAlias = Int | Float
 Boolean: TypeAlias = bool | np.bool_
-NumberT = TypeVar("NumberT", int, float, np.number[Any])
 
 # - pandas
 PythonScalar: TypeAlias = Union[str, float, bool]
@@ -149,6 +151,9 @@ Scalar: TypeAlias = Union[PythonScalar, PandasScalar, np.datetime64, np.timedelt
 MaskType: TypeAlias = Union["pd.Series[bool]", "NDArray[np.bool_]", list[bool]]
 
 
+# =====================================================================================================================
+# - Protocols
+# =====================================================================================================================
 class SliceLike(Protocol[_T_co]):
     @property
     def start(self) -> _T_co:
@@ -167,9 +172,6 @@ Slice: TypeAlias = SliceLike[_T_co] | slice
 TimeSlice: TypeAlias = SliceLike[np.datetime64]
 
 
-# =====================================================================================================================
-# - Protocols
-# =====================================================================================================================
 class Indices(Sized, Iterable[_T_co], Protocol[_T_co]):
     ...
 
