@@ -32,6 +32,7 @@ from ._typing import (
     Self,
     Sequence,
     Slice,
+    TimeSlice,
     TypeAlias,
     Union,
 )
@@ -52,7 +53,7 @@ from .enums import (
     Z,
 )
 from .generic import Data, DataWorker
-from .utils import area_definition, log_scale, mask_time, sort_unique
+from .utils import area_definition, log_scale, slice_time, sort_unique
 
 Depends: TypeAlias = Union[type[DependentVariables], DependentVariables, Sequence[DependentVariables], "Dependencies"]
 ResampleInstruction: TypeAlias = tuple["DependentDataset", AreaExtent]
@@ -386,11 +387,11 @@ class AbstractInstruction(abc.ABC):
     def time(self) -> Array[[N], np.datetime64]:
         return self.instruction._time
 
+    def slice_time(self, s: TimeSlice, /) -> Array[[N], np.datetime64]:
+        return slice_time(self.time, s)
+
 
 class _Instruction(Iterable[ResampleInstruction], AbstractInstruction):
-    levels: Array[[N], np.float_]
-    time: Array[[N], np.datetime64]
-
     def __init__(self, scale: Mesoscale, *dsets: DependentDataset) -> None:
         super().__init__()
 
@@ -464,12 +465,11 @@ class ReSampler(AbstractInstruction):
             for ds, area_extent in self._instruction
         ]
 
-    def __call__(
-        self, longitude: Longitude, latitude: Latitude, time: Slice[np.datetime64]
-    ) -> Array[[N, N, N, N, N], np.float_]:
+    def __call__(self, longitude: Longitude, latitude: Latitude, time: TimeSlice) -> Array[[N, N, N, N, N], np.float_]:
         arr = np.stack(self._resample_point_over_time(longitude, latitude, time))
         # - reshape the data
-        t = (time.stop - time.start) // np.timedelta64(1, "h") + 1
+        t = len(self.slice_time(time))  # (time.stop - time.start) // np.timedelta64(1, "h") + 1
+
         z, y, x = arr.shape[:3]
         arr = arr.reshape((z, y, x, t, -1))  # unsqueeze C
         return np.moveaxis(arr, (-1, -2), (0, 1))
@@ -527,7 +527,7 @@ class ArrayWorker(DataWorker[PointOverTime, Array[[N, N, N, N, N], np.float_]], 
         (lon, lat), time = idx
         return self.sampler(lon, lat, time)
 
-    def get_array(self, idx: PointOverTime) -> xr.DataArray:
+    def get_array(self, idx: PointOverTime, /) -> xr.DataArray:
         data = self[idx]
         _, time = idx
 
@@ -537,9 +537,9 @@ class ArrayWorker(DataWorker[PointOverTime, Array[[N, N, N, N, N], np.float_]], 
             coords={
                 _VARIABLES: self.dvars[0],
                 LVL: (LVL.axis, self.levels),
-                TIME: (TIME.axis, mask_time(self.time, time)),
+                TIME: (TIME.axis, self.slice_time(time)),
             },
         )
 
-    def get_dataset(self, idx: PointOverTime) -> xr.Dataset:
+    def get_dataset(self, idx: PointOverTime, /) -> xr.Dataset:
         return self.get_array(idx).to_dataset(_VARIABLES)

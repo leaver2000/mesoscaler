@@ -153,7 +153,9 @@ def area_definition(
 # =====================================================================================================================
 # - array/tensor utils
 # =====================================================================================================================
-def mask_time(t: Array[[N], np.datetime64], s: TimeSlice, /) -> Array[[N], np.datetime64]:
+def slice_time(t: Array[[...], np.datetime64], s: TimeSlice, /) -> Array[[N], np.datetime64]:
+    if s.start is None or s.stop is None or s.step is not None:
+        raise ValueError(f"invalid slice: {s}")
     return t[(s.start <= t) | (t <= s.stop)]
 
 
