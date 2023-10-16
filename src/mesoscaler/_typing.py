@@ -90,25 +90,6 @@ from typing import (
 import numpy as np
 import pandas as pd
 
-# from ._typeshed import (
-#     N1,
-#     N2,
-#     N3,
-#     N4,
-#     AnyArrayLike,
-#     Array,
-#     ArrayLike,
-#     ListLike,
-#     N,
-#     Nd,
-#     NDArray,
-#     NestedSequence,
-#     NumpyDType_T,
-#     PandasArrayLike,
-#     PandasDType_T,
-#     TensorLike,
-# )
-
 if sys.version_info <= (3, 9):
     from typing_extensions import ParamSpec, Self, TypeAlias, TypeVarTuple, Unpack
 
@@ -136,7 +117,7 @@ _P = ParamSpec("_P")
 _T = TypeVar("_T", bound=Any)
 _T_co = TypeVar("_T_co", bound=Any, covariant=True)
 _T_contra = TypeVar("_T_contra", bound=Any, covariant=True)
-_Numpy_T_co = TypeVar("_Numpy_T_co", covariant=True, bound=np.generic)
+_Numpy_T_co = TypeVar("_Numpy_T_co", bound=np.generic, covariant=True)
 NumpyDType_T = TypeVar("NumpyDType_T", bound=np.dtype[Any])
 PandasDType_T = TypeVar(
     "PandasDType_T",
@@ -273,3 +254,10 @@ AnyArrayLike: TypeAlias = Union[
 ]
 
 ListLike: TypeAlias = Sequence[_T_co] | Iterable[_T_co]
+#
+AreaExtent: TypeAlias = Array[[N4], np.float_]
+"""A 4-tuple of `(x_min, y_min, x_max, y_max)`"""
+Longitude: TypeAlias = float
+Latitude: TypeAlias = float
+Point: TypeAlias = tuple[Longitude, Latitude]
+PointOverTime: TypeAlias = tuple[Point, TimeSlice]

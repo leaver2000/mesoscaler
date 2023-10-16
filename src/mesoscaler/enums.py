@@ -1,6 +1,12 @@
 """A mix of Abstract Base Classes and Generic Data Adapters for various data structures."""
 from __future__ import annotations
 
+import enum
+import functools
+from typing import Literal
+
+import pyproj
+
 from ._metadata import DependentVariables, IndependentVariables, auto_field
 
 
@@ -150,3 +156,19 @@ URMA_VARS = (
     URMA.VIS,
     URMA.OROG,
 )
+
+
+class CoordinateReferenceSystem(functools.partial, enum.Enum):
+    lambert_azimuthal_equal_area = laea = pyproj.CRS, {
+        "proj": "laea",
+    }
+    lambert_conformal_conic = lcc = pyproj.CRS, {
+        "proj": "lcc",
+    }
+
+    def from_point(self, longitude: float, latitude: float) -> pyproj.CRS:
+        return self(longitude=longitude, latitude=latitude)
+
+
+LiteralProjection = Literal["laea", "lcc", "lambert_azimuthal_equal_area", "lambert_conformal_conic"]
+LiteralCRS = CoordinateReferenceSystem | LiteralProjection

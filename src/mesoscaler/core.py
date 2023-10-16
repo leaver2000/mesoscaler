@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import abc
 import functools
 
 import numpy as np
@@ -7,24 +8,27 @@ import pandas as pd
 import pyproj
 import pyresample.geometry
 import xarray as xr
+from pyresample.geometry import AreaDefinition, GridDefinition
 from xarray.core.coordinates import DatasetCoordinates
 
 from ._typing import (
     N2,
     N4,
     Any,
+    AreaExtent,
     Array,
-    Callable,
-    Final,
     Hashable,
     Iterable,
     Iterator,
+    Latitude,
     ListLike,
     Literal,
+    Longitude,
     Mapping,
     N,
     NDArray,
     Number,
+    PointOverTime,
     Self,
     Sequence,
     Slice,
@@ -37,21 +41,21 @@ from .enums import (
     LON,
     LVL,
     TIME,
+    CoordinateReferenceSystem,
     Coordinates,
     DependentVariables,
     Dimensions,
+    LiteralCRS,
     T,
     X,
     Y,
     Z,
 )
-from .generic import Data
-from .utils import log_scale, sort_unique
+from .generic import Data, DataWorker
+from .utils import area_definition, log_scale, mask_time, sort_unique
 
-AreaExtent: TypeAlias = Array[[N4], np.float_]
-"""A 4-tuple of `(x_min, y_min, x_max, y_max)`"""
 Depends: TypeAlias = Union[type[DependentVariables], DependentVariables, Sequence[DependentVariables], "Dependencies"]
-ResampleInstruction: TypeAlias = "tuple[DependentDataset, AreaExtent]"
+ResampleInstruction: TypeAlias = tuple["DependentDataset", AreaExtent]
 Unit = Literal["km", "m"]
 # =====================================================================================================================
 STANDARD_SURFACE_PRESSURE = P0 = 1013.25  # - hPa
@@ -59,10 +63,11 @@ P1 = 25.0  # - hPa
 DEFAULT_PRESSURE: ListLike[Number] = [P0, 925.0, 850.0, 700.0, 500.0, 300.0]  # - hPa
 DERIVED_SURFACE_COORDINATE = {LVL: (LVL.axis, [STANDARD_SURFACE_PRESSURE])}
 """If the Dataset does not contain a vertical coordinate, it is assumed to be a derived atmospheric parameter
-or near surface paramter. The vertical coordinate is then set to the standard surface pressure of 1013.25 hPa."""
+or near surface parameter. The vertical coordinate is then set to the standard surface pressure of 1013.25 hPa."""
 MESOSCALE_BETA = 200.0  # - km
 
 _units: Mapping[Unit, float] = {"km": 1.0, "m": 1000.0}
+_VARIABLES = "variables"
 _GRID_DEFINITION = "grid_definition"
 _DEPENDS = "depends"
 
@@ -102,7 +107,7 @@ class Dependencies:
 
     @property
     def names(self) -> pd.Index[str]:
-        return self.enum._names # TODO: the enum names should not be a private attribute
+        return self.enum._names  # TODO: the enum names should not be a private attribute
 
     @property
     def crs(self) -> pyproj.CRS:
@@ -213,18 +218,14 @@ class IndependentDataset(xr.Dataset):
     def lons(self) -> xr.DataArray:
         return self[LON]
 
-# TODO: 
+
 class DependentDataset(IndependentDataset):
     __slots__ = ()
     __dims__ = (T, Z, Y, X)
     __coords__ = (TIME, LVL, LAT, LON)
 
     def __init__(
-        self,
-        data: xr.Dataset,
-        *,
-        depends: Depends | None = None,
-        attrs: Mapping[str, Any] | None = None,
+        self, data: xr.Dataset, *, attrs: Mapping[str, Any] | None = None, depends: Depends | None = None
     ) -> None:
         # TODO:
         # - add method to create the dataset from a 4/5d array
@@ -234,28 +235,24 @@ class DependentDataset(IndependentDataset):
                 _DEPENDS: data.depends,
             }
         super().__init__(data, attrs=attrs)
-        if depends is not None: # TODO: these 2 conditionas can be consilidated
+        if depends is not None:  # TODO: these 2 conditionals can be consolidated
             self.attrs[_DEPENDS] = depends
 
         if _GRID_DEFINITION not in self.attrs:
             lons, lats = (self[x].to_numpy() for x in (LON, LAT))
-            lons = (lons + 180.0) % 360 - 180.0 
+            lons = (lons + 180.0) % 360 - 180.0
             # TODO: need to write a test for this and insure
             # the lons are in the range of -180 to 180
-            self.attrs[_GRID_DEFINITION] = pyresample.geometry.GridDefinition(lons, lats)
+            self.attrs[_GRID_DEFINITION] = GridDefinition(lons, lats)
         assert is_independent(self)
 
     @classmethod
-    def from_zarr(
-        cls,
-        store: Any,
-        depends: Depends,
-    ) -> DependentDataset:
+    def from_zarr(cls, store: Any, depends: Depends) -> DependentDataset:
         depends = Dependencies(depends)
         return cls.from_dependant(xr.open_zarr(store, drop_variables=depends.difference), depends=depends)
 
     @property
-    def grid_definition(self) -> pyresample.geometry.GridDefinition:
+    def grid_definition(self) -> GridDefinition:
         return self.attrs[_GRID_DEFINITION]
 
     @property
@@ -266,14 +263,6 @@ class DependentDataset(IndependentDataset):
 # =====================================================================================================================
 # - Resampling
 # =====================================================================================================================
-def _instruction_iterator(scale: Mesoscale, *dsets: DependentDataset) -> Iterator[ResampleInstruction]:
-    levels = np.concatenate([ds.level for ds in dsets])
-    levels = np.sort(levels[np.isin(levels, scale.hpa)])[::-1]
-    datasets = (ds.sel({LVL: [lvl]}) for lvl in levels for ds in dsets if lvl in ds.level)
-    extents = scale.stack_extent() * 1000.0  # km -> m
-    return zip(datasets, extents)
-
-
 class Mesoscale(Data[NDArray[np.float_]]):
     def __init__(
         self,
@@ -361,143 +350,196 @@ class Mesoscale(Data[NDArray[np.float_]]):
         xy = self.to_numpy(units=units)
         return np.c_[-xy, xy]
 
-    def resample(self, *dsets: DependentDataset, height: int = 80, width: int = 80) -> ReSampler:
-        return ReSampler(_instruction_iterator(self, *dsets), height=height, width=width)
+    def resample(
+        self,
+        *dsets: DependentDataset,
+        height: int = 80,
+        width: int = 80,
+        target_projection: LiteralCRS = "lambert_azimuthal_equal_area",
+    ) -> ReSampler:
+        return ReSampler(
+            _Instruction(self, *dsets),
+            height=height,
+            width=width,
+            target_projection=target_projection,
+        )
 
 
 # =====================================================================================================================
-# TODO: the projection section can be improved
-_laea = {
-    "proj": "laea",
-    "x_0": 0,
-    "y_0": 0,
-    "ellps": "WGS84",
-    "units": "m",
-    "no_defs": None,
-    "type": "crs",
-}
-
-
-def lambert_equal_area(longitude: float, latitude: float) -> pyproj.CRS:
-    return pyproj.CRS(_laea | {"lat_0": latitude, "lon_0": longitude})
-
-
-def lambert_conformal_conic(longitude: float, latitude: float) -> pyproj.CRS:
-    return pyproj.CRS(
-        {
-            "proj": "lcc",
-            "lat_1": 30,
-            "lat_2": 60,
-            "lat_0": latitude,
-            "lon_0": longitude,
-            "x_0": 0,
-            "y_0": 0,
-            "ellps": "WGS84",
-            "units": "m",
-            "no_defs": None,
-            "type": "crs",
-        }
-    )
-
-
-_projection_map: Final[Mapping[str, Callable[[float, float], pyproj.CRS]]] = {
-    "lambert_azimuthal_equal_area": lambert_equal_area,
-    "lambert_conformal_conic": lambert_conformal_conic,
-}
-
-
-def area_definition(
-    width: float,
-    height: float,
-    projection: pyproj.CRS,
-    area_extent: AreaExtent,
-    lons: NDArray[np.float_] | None = None,
-    lats: NDArray[np.float_] | None = None,
-    dtype: Any = np.float_,
-    area_id: str = "undefined",
-    description: str = "undefined",
-    proj_id: str = "undefined",
-    nprocs: int = 1,
-) -> pyresample.geometry.AreaDefinition:
-    return pyresample.geometry.AreaDefinition(
-        area_id,
-        description,
-        proj_id,
-        width=width,
-        height=height,
-        projection=projection,
-        area_extent=area_extent,
-        lons=lons,
-        lats=lats,
-        dtype=dtype,
-        nprocs=nprocs,
-    )
-
-
+#
 # =====================================================================================================================
-class ReSampler:
+class AbstractInstruction(abc.ABC):
+    @property
+    @abc.abstractmethod
+    def instruction(self) -> _Instruction:
+        ...
+
+    @property
+    def dvars(self) -> Array[[N, N], np.str_]:
+        return self.instruction._dvars
+
+    @property
+    def levels(self) -> Array[[N], np.float_]:
+        return self.instruction._levels
+
+    @property
+    def time(self) -> Array[[N], np.datetime64]:
+        return self.instruction._time
+
+
+class _Instruction(Iterable[ResampleInstruction], AbstractInstruction):
+    levels: Array[[N], np.float_]
+    time: Array[[N], np.datetime64]
+
+    def __init__(self, scale: Mesoscale, *dsets: DependentDataset) -> None:
+        super().__init__()
+
+        time, levels, dvars = zip(*((ds.time.to_numpy(), ds.level.to_numpy(), list(ds.data_vars)) for ds in dsets))
+        # - time
+        self._time = time = np.sort(np.unique(time))
+
+        # - levels
+        levels = np.concatenate(levels)
+        self._levels = levels = np.sort(levels[np.isin(levels, scale.hpa)])[::-1]  # descending
+
+        # - dvars
+        self._dvars = np.stack(dvars)
+
+        datasets = (ds.sel({LVL: [lvl], TIME: time}) for lvl in levels for ds in dsets if lvl in ds.level)
+        extents = scale.stack_extent() * 1000.0  # km -> m
+        self._it = tuple(zip(datasets, extents))
+
+    def __iter__(self) -> Iterator[ResampleInstruction]:
+        return iter(self._it)
+
+    @property
+    def instruction(self) -> _Instruction:
+        return self
+
+
+class ReSampler(AbstractInstruction):
     def __init__(
         self,
-        instruction: Iterator[ResampleInstruction],
+        instruction: _Instruction,
         /,
         *,
         height: int = 80,
         width: int = 80,
-        target_projection: str = "lambert_azimuthal_equal_area",
+        target_projection: LiteralCRS = "lambert_azimuthal_equal_area",
+        method: str = "resample_nearest",
     ) -> None:
-        self._instruction = iter(instruction)
+        self._instruction = instruction
         self.height = height
         self.width = width
-        self.target_projection = _projection_map[target_projection]
-
-    @classmethod
-    def create(cls, scale: Mesoscale, *dsets: DependentDataset, height: int = 80, width: int = 80) -> ReSampler:
-        return cls(_instruction_iterator(scale, *dsets), height=height, width=width)
-
-    def _generate(
-        self,
-        __func: Callable[
-            [pyresample.geometry.GridDefinition, xr.Dataset, pyresample.geometry.AreaDefinition], NDArray
-        ],
-        partial: functools.partial[pyresample.geometry.AreaDefinition],
-        time: Slice[np.datetime64],
-    ) -> Array[[N, N, N, N, N], np.float_]:
-        # - resample the data
-        arr = np.stack(
-            [
-                __func(ds.grid_definition, ds.sel({TIME: time}), partial(area_extent=area_extent))
-                for ds, area_extent in self._instruction
-            ],
+        self.target_projection = (
+            CoordinateReferenceSystem[target_projection] if isinstance(target_projection, str) else target_projection
         )
+        self._method = {
+            "resample_nearest": self._resample_nearest,
+            "some_other_method": self._some_other_method,
+        }[method]
+
+    @property
+    def instruction(self) -> _Instruction:
+        return self._instruction
+
+    def _partial_area_definition(self, longitude: Longitude, latitude: Latitude) -> functools.partial[AreaDefinition]:
+        return functools.partial(
+            area_definition,
+            width=self.width,
+            height=self.height,
+            projection=self.target_projection.from_point(longitude, latitude),
+        )
+
+    def _resample_point_over_time(
+        self, longitude: Longitude, latitude: Latitude, time: Slice[np.datetime64]
+    ) -> list[NDArray]:
+        partial = self._partial_area_definition(longitude, latitude)
+        return [
+            self._method(
+                ds.grid_definition,
+                ds.sel({TIME: time}).to_stacked_array("C", [Y, X]).to_numpy(),
+                partial(area_extent=area_extent),
+            )
+            for ds, area_extent in self._instruction
+        ]
+
+    def __call__(
+        self, longitude: Longitude, latitude: Latitude, time: Slice[np.datetime64]
+    ) -> Array[[N, N, N, N, N], np.float_]:
+        arr = np.stack(self._resample_point_over_time(longitude, latitude, time))
         # - reshape the data
         t = (time.stop - time.start) // np.timedelta64(1, "h") + 1
         z, y, x = arr.shape[:3]
         arr = arr.reshape((z, y, x, t, -1))  # unsqueeze C
         return np.moveaxis(arr, (-1, -2), (0, 1))
 
-    def nearest(
-        self,
-        longitude: float,
-        latitude: float,
-        *,
-        time: Slice[np.datetime64],
-    ) -> Array[[N, N, N, N, N], np.float_]:
-        partial = functools.partial(
-            area_definition,
-            width=self.width,
-            height=self.height,
-            projection=self.target_projection(longitude, latitude),
-        )
-        return self._generate(self._resample_nearest, partial, time)
-
     def _resample_nearest(
         self,
-        source: pyresample.geometry.GridDefinition,
-        ds: xr.Dataset,
-        target: pyresample.geometry.AreaDefinition,
+        source: GridDefinition,
+        data: NDArray,
+        target: AreaDefinition,
     ) -> NDArray[np.float_]:
         return pyresample.kd_tree.resample_nearest(
-            source, data=ds.to_stacked_array("C", [Y, X]).to_numpy(), target_geo_def=target, radius_of_influence=500000
+            source, data=data, target_geo_def=target, radius_of_influence=500000
         )
 
-# TODO: need to add the DataWorker, DataConsumer implementation's
+    def _some_other_method(
+        self,
+        source: GridDefinition,
+        data: NDArray,
+        target: AreaDefinition,
+    ) -> NDArray[np.float_]:
+        raise NotImplementedError
+
+
+# =====================================================================================================================
+class ArrayWorker(DataWorker[PointOverTime, Array[[N, N, N, N, N], np.float_]], AbstractInstruction):
+    def __init__(
+        self,
+        indices: Iterable[PointOverTime],
+        *dsets: DependentDataset,
+        scale: Mesoscale,
+        height: int = 80,
+        width: int = 80,
+        target_projection: LiteralCRS = "lambert_azimuthal_equal_area",
+    ) -> None:
+        super().__init__(
+            indices,
+            hpa=scale.hpa,
+            sampler=scale.resample(
+                *dsets,
+                height=height,
+                width=width,
+                target_projection=target_projection,
+            ),
+        )
+
+    @property
+    def sampler(self) -> ReSampler:
+        return self.attrs["sampler"]
+
+    @property
+    def instruction(self) -> _Instruction:
+        return self.sampler._instruction
+
+    def __getitem__(self, idx: PointOverTime) -> Array[[N, N, N, N, N], np.float_]:
+        (lon, lat), time = idx
+        return self.sampler(lon, lat, time)
+
+    def get_array(self, idx: PointOverTime) -> xr.DataArray:
+        data = self[idx]
+        _, time = idx
+
+        return xr.DataArray(
+            data,
+            dims=(_VARIABLES, T, Z, Y, X),
+            coords={
+                _VARIABLES: self.dvars[0],
+                LVL: (LVL.axis, self.levels),
+                TIME: (TIME.axis, mask_time(self.time, time)),
+            },
+        )
+
+    def get_dataset(self, idx: PointOverTime) -> xr.Dataset:
+        return self.get_array(idx).to_dataset(_VARIABLES)

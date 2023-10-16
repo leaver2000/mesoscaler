@@ -221,10 +221,12 @@ class _EnumMetaCls(enum.EnumMeta):
         return cls._series.to_list()
 
     def is_in(cls, item: _Item | Iterable[_Item], /) -> pd.Series[bool]:
-        # if the child enum is a tuple we dont want to iter item
-        item = list([item] if type(item) in cls.mro() or isinstance(item, Hashable) else item)  # type:ignore
+        if isinstance(item, str) or not isinstance(item, Iterable):
+            item = [item]
 
-        return cls._series.isin(item) | cls._names.isin(item) | cls._aliases.isin(item).any(axis=0, skipna=True)
+        items = list([item] if type(item) in cls.mro() else item)
+
+        return cls._series.isin(items) | cls._names.isin(items) | cls._aliases.isin(items).any(axis=0, skipna=True)
 
     def difference(cls, item: _Item | Iterable[_Item], /) -> set[Any]:
         return set(cls).difference(cls(item))
