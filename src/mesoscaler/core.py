@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import abc
 import functools
+from typing import NewType
 
 import numpy as np
 import pandas as pd
@@ -54,6 +55,11 @@ from .enums import (
 )
 from .generic import Data, DataWorker
 from .utils import area_definition, log_scale, slice_time, sort_unique
+
+Nx = NewType("Nx", int)
+Ny = NewType("Ny", int)
+Nt = NewType("Nt", int)
+Nz = NewType("Nz", int)
 
 Depends: TypeAlias = Union[type[DependentVariables], DependentVariables, Sequence[DependentVariables], "Dependencies"]
 ResampleInstruction: TypeAlias = tuple["DependentDataset", AreaExtent]
@@ -429,7 +435,7 @@ def _get_partial_method(
     nprocs=1,
     segments=None,
     with_uncert: bool = False,
-) -> functools.partial[NDArray[np.float_]]:
+) -> functools.partial[Array[[Nx, Ny, N], np.float_]]:
     if method == "nearest":
         func = pyresample.kd_tree.resample_nearest
         kwargs = dict(
@@ -505,7 +511,7 @@ class ReSampler(AbstractInstruction):
 
     def _resample_point_over_time(
         self, longitude: Longitude, latitude: Latitude, time: Slice[np.datetime64]
-    ) -> list[NDArray]:
+    ) -> list[Array[[Nx, Ny, N], np.float_]]:
         area_definition = self._partial_area_definition(longitude, latitude)
 
         return [
@@ -517,11 +523,13 @@ class ReSampler(AbstractInstruction):
             for ds, area_extent in self._instruction
         ]
 
-    def __call__(self, longitude: Longitude, latitude: Latitude, time: TimeSlice) -> Array[[N, N, N, N, N], np.float_]:
-        arr = np.stack(self._resample_point_over_time(longitude, latitude, time))
-        # - reshape the data
-        t = len(self.slice_time(time))  # (time.stop - time.start) // np.timedelta64(1, "h") + 1
+    def __call__(
+        self, longitude: Longitude, latitude: Latitude, time: TimeSlice
+    ) -> Array[[N, Nt, Nz, Ny, Nx], np.float_]:
+        arr: Array[[Nz, Ny, Nx, N], np.float_] = np.stack(self._resample_point_over_time(longitude, latitude, time))
 
+        # - reshape the data
+        t = len(self.slice_time(time))
         z, y, x = arr.shape[:3]
         arr = arr.reshape((z, y, x, t, -1))  # unsqueeze C
         return np.moveaxis(arr, (-1, -2), (0, 1))
