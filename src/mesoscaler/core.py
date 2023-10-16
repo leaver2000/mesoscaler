@@ -357,12 +357,14 @@ class Mesoscale(Data[NDArray[np.float_]]):
         height: int = 80,
         width: int = 80,
         target_projection: LiteralCRS = "lambert_azimuthal_equal_area",
+        method: str = "nearest",
     ) -> ReSampler:
         return ReSampler(
             _Instruction(self, *dsets),
             height=height,
             width=width,
             target_projection=target_projection,
+            method=method,
         )
 
 
@@ -418,6 +420,41 @@ class _Instruction(Iterable[ResampleInstruction], AbstractInstruction):
         return self
 
 
+def _get_partial_method(
+    method,
+    sigmas=[1.0],
+    radius_of_influence=500000,
+    fill_value=0,
+    reduce_data=True,
+    nprocs=1,
+    segments=None,
+    with_uncert: bool = False,
+) -> functools.partial[NDArray[np.float_]]:
+    if method == "nearest":
+        func = pyresample.kd_tree.resample_nearest
+        kwargs = dict(
+            radius_of_influence=radius_of_influence,
+            fill_value=fill_value,
+            reduce_data=reduce_data,
+            nprocs=nprocs,
+            segments=segments,
+        )
+    elif method == "gauss":
+        func = pyresample.kd_tree.resample_gauss
+        kwargs = dict(
+            sigmas=sigmas,
+            radius_of_influence=radius_of_influence,
+            fill_value=fill_value,
+            reduce_data=reduce_data,
+            nprocs=nprocs,
+            segments=segments,
+            with_uncert=with_uncert,
+        )
+    else:
+        raise ValueError(f"method {method} is not supported!")
+    return functools.partial(func, **kwargs)
+
+
 class ReSampler(AbstractInstruction):
     def __init__(
         self,
@@ -427,7 +464,14 @@ class ReSampler(AbstractInstruction):
         height: int = 80,
         width: int = 80,
         target_projection: LiteralCRS = "lambert_azimuthal_equal_area",
-        method: str = "resample_nearest",
+        method: str = "nearest",
+        sigmas=[1.0],
+        radius_of_influence=500000,
+        fill_value=0,
+        reduce_data=True,
+        nprocs=1,
+        segments=None,
+        with_uncert: bool = False,
     ) -> None:
         self._instruction = instruction
         self.height = height
@@ -435,10 +479,17 @@ class ReSampler(AbstractInstruction):
         self.target_projection = (
             CoordinateReferenceSystem[target_projection] if isinstance(target_projection, str) else target_projection
         )
-        self._method = {
-            "resample_nearest": self._resample_nearest,
-            "some_other_method": self._some_other_method,
-        }[method]
+
+        self._resample_method = _get_partial_method(
+            method,
+            radius_of_influence=radius_of_influence,
+            fill_value=fill_value,
+            reduce_data=reduce_data,
+            nprocs=nprocs,
+            segments=segments,
+            with_uncert=with_uncert,
+            sigmas=sigmas,
+        )
 
     @property
     def instruction(self) -> _Instruction:
@@ -455,12 +506,13 @@ class ReSampler(AbstractInstruction):
     def _resample_point_over_time(
         self, longitude: Longitude, latitude: Latitude, time: Slice[np.datetime64]
     ) -> list[NDArray]:
-        partial = self._partial_area_definition(longitude, latitude)
+        area_definition = self._partial_area_definition(longitude, latitude)
+
         return [
-            self._method(
+            self._resample_method(
                 ds.grid_definition,
                 ds.sel({TIME: time}).to_stacked_array("C", [Y, X]).to_numpy(),
-                partial(area_extent=area_extent),
+                area_definition(area_extent=area_extent),
             )
             for ds, area_extent in self._instruction
         ]
@@ -473,24 +525,6 @@ class ReSampler(AbstractInstruction):
         z, y, x = arr.shape[:3]
         arr = arr.reshape((z, y, x, t, -1))  # unsqueeze C
         return np.moveaxis(arr, (-1, -2), (0, 1))
-
-    def _resample_nearest(
-        self,
-        source: GridDefinition,
-        data: NDArray,
-        target: AreaDefinition,
-    ) -> NDArray[np.float_]:
-        return pyresample.kd_tree.resample_nearest(
-            source, data=data, target_geo_def=target, radius_of_influence=500000
-        )
-
-    def _some_other_method(
-        self,
-        source: GridDefinition,
-        data: NDArray,
-        target: AreaDefinition,
-    ) -> NDArray[np.float_]:
-        raise NotImplementedError
 
 
 # =====================================================================================================================
