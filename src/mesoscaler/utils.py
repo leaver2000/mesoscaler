@@ -39,7 +39,7 @@ except (NameError, ImportError):
         import tqdm  # type: ignore
     except ImportError:
         tqdm = None  # type: ignore
-from ._torch_compat import Tensor
+# from ._torch_compat import Tensor
 from ._typing import (
     Any,
     AnyArrayLike,
@@ -115,10 +115,9 @@ def is_array_like(x: Any) -> TypeGuard[AnyArrayLike]:
 # =====================================================================================================================
 # - array/tensor utils
 # =====================================================================================================================
-TensorT = TypeVar("TensorT", Tensor, Array[[...], Any])
 
 
-def normalize(x: TensorT) -> TensorT:
+def normalize(x: NDArray[np.number[Any]]) -> NDArray[np.float_]:
     """
     Normalize the input tensor along the specified dimensions.
 
@@ -132,12 +131,12 @@ def normalize(x: TensorT) -> TensorT:
     Raises:
         TypeError: If the input tensor is not a numpy array or a PyTorch tensor.
     """
-    if not isinstance(x, (np.ndarray, Tensor)):
+    if not isinstance(x, np.ndarray):
         raise TypeError("Input tensor must be a numpy array or a PyTorch tensor.")
     return (x - x.min()) / (x.max() - x.min())  # pyright: ignore
 
 
-def normalized_scale(x: TensorT, rate: float = 1.0) -> TensorT:
+def normalized_scale(x: NDArray[np.number[Any]], rate: float = 1.0) -> NDArray[np.float_]:
     """
     Scales the input tensor `x` by a factor of `rate` after normalizing it.
 
@@ -155,7 +154,7 @@ def normalized_scale(x: TensorT, rate: float = 1.0) -> TensorT:
     return x
 
 
-def log_scale(x: NDArray[np.number], rate: float = 1.0) -> NDArray[np.float_]:
+def log_scale(x: NDArray[np.number[Any]], rate: float = 1.0) -> NDArray[np.float_]:
     return normalized_scale(np.log(x), rate=rate)
 
 
@@ -223,7 +222,7 @@ def interp_frames(
     >>> atmoformer.utils.interpatch(arr, 768).shape
     (768, 768, 49)
     """
-    from scipy.interpolate import RegularGridInterpolator
+    from scipy.interpolate import RegularGridInterpolator  # type: ignore[import]
 
     x, y = arr.shape[:2]
     if x != y:  # first two dimensions must be equal

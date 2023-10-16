@@ -7,6 +7,7 @@ import itertools
 import queue
 import random
 import threading
+from typing import ForwardRef
 
 from ._typing import (
     Any,
@@ -26,7 +27,6 @@ from ._typing import (
     Sized,
     TypeVar,
     TypeVarTuple,
-    Unpack,
     get_first_order_generic,
     overload,
 )
@@ -34,15 +34,10 @@ from .utils import acc_size, is_array_like, join_kv
 
 _T = TypeVar("_T")
 _Ts = TypeVarTuple("_Ts")
-import types
 
 
-class NamedAndSized(Sized, Generic[Unpack[_Ts]], abc.ABC):
+class NamedAndSized(Sized, abc.ABC):
     __slots__ = ()
-    __first_order_generics__: tuple[types.GenericAlias, ...]
-
-    def __init_subclass__(cls) -> None:
-        cls.__first_order_generics__ = get_first_order_generic(cls)  # type: ignore
 
     @property
     def name(self) -> str:
@@ -53,10 +48,30 @@ class NamedAndSized(Sized, Generic[Unpack[_Ts]], abc.ABC):
         return len(self)
 
 
+class GenericRepresentation:
+    def __init__(self, x: Any) -> None:
+        x = get_first_order_generic(x)[-1]
+        if isinstance(x, ForwardRef):
+            x = x.__forward_arg__
+
+        self.x = (
+            str(x)
+            .replace(getattr(x, "__module__", "") + ".", "")
+            .replace(f"{__package__}.", "")
+            .replace("__main__.", "")
+            .replace("_typing.", "")
+            .replace("typing.", "")
+            .replace("Ellipsis", "...")
+        )
+
+    def __repr__(self) -> str:
+        return self.x
+
+
 # =====================================================================================================================
 #
 # =====================================================================================================================
-class Data(NamedAndSized[_T], abc.ABC):
+class Data(NamedAndSized, Generic[_T], abc.ABC):
     """
     ```
     >>> class MyData(Data[int]):
@@ -107,7 +122,7 @@ class MappingBase(NamedAndSized, Mapping[HashableT, _T], abc.ABC):
 # =====================================================================================================================
 #
 # =====================================================================================================================
-class Dataset(NamedAndSized[_T], abc.ABC):
+class Dataset(NamedAndSized, Generic[_T], abc.ABC):
     @abc.abstractmethod
     def __getitem__(self, index: int) -> _T:
         ...
@@ -146,7 +161,7 @@ class ConcatDataset(Dataset[_T]):
 # =====================================================================================================================
 #
 # =====================================================================================================================
-class IterableDataset(NamedAndSized[_T], abc.ABC):
+class IterableDataset(NamedAndSized, Generic[_T], abc.ABC):
     @abc.abstractmethod
     def __iter__(self) -> Iterator[_T]:
         ...
@@ -184,17 +199,7 @@ class DataMapping(MappingBase[HashableT, _T]):
     def __len__(self) -> int:
         return len(self._data)
 
-class _GenericRepresentation:
-    def __init__(self, x:types.GenericAlias):
-        self.x  = (
-            str(x)
-            .replace(getattr(x, "__module__") + ".", "")
-            .replace(f"{__package__}.", "")
-            .replace("__main__.", "")
-            .replace("typing.", "")
-        )
-    def __repr__(self):
-        return self.x
+
 class DataWorker(MappingBase[HashableT, _T]):
     def __init__(self, indices: Iterable[HashableT], **config: Any) -> None:
         super().__init__()
@@ -214,7 +219,8 @@ class DataWorker(MappingBase[HashableT, _T]):
     def __repr__(self) -> str:
         name = self.name
         size = self.size
-        data = _GenericRepresentation(self.__first_order_generics__[-1])
+        # because we're lazily loading data we can attempt to use the type annotation of _T class as the representation
+        data = GenericRepresentation(self)
         text = join_kv(f"{name}({size=}):", *zip(self.indices, itertools.repeat(data)), start=0, stop=5)
         return text
 
@@ -243,8 +249,6 @@ class DataWorker(MappingBase[HashableT, _T]):
 # =====================================================================================================================
 #
 # =====================================================================================================================
-
-
 class DataConsumer(IterableDataset[_T], Generic[HashableT, _T]):
     def __init__(self, worker: Mapping[HashableT, _T], *, maxsize: int = 0, timeout: float | None = None) -> None:
         super().__init__()

@@ -1,6 +1,7 @@
 import typing
 
 from src.mesoscaler.generic import DataMapping, Dataset
+from src.mesoscaler._typing import get_first_order_generic
 
 
 class MyDataset(Dataset[int]):
@@ -17,7 +18,7 @@ class MyDataset(Dataset[int]):
 
 def test_dataset() -> None:
     a = MyDataset()
-    a.__first_order_generics__ = (int,)
+
     b = MyDataset()
     c = a + b
     assert len(c) == 20
@@ -26,8 +27,8 @@ def test_dataset() -> None:
 
 def test_generic_data_mapping() -> None:
     data = DataMapping({"a": 1})
-    for x in data.__first_order_generics__:
-        assert isinstance(x, typing.TypeVar)
+    for arg in get_first_order_generic(data):
+        assert isinstance(arg, typing.TypeVar)
 
 
 class ListMapping(DataMapping[str, list[int]]):
@@ -37,4 +38,4 @@ class ListMapping(DataMapping[str, list[int]]):
 
 def test_list_mapping() -> None:
     data = ListMapping()
-    assert data.__first_order_generics__ == (str, list[int])
+    assert get_first_order_generic(data) == (str, list[int])
