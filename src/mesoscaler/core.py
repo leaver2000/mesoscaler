@@ -49,22 +49,19 @@ from .generic import Data
 from .utils import log_scale, sort_unique
 
 AreaExtent: TypeAlias = Array[[N4], np.float_]
-Definition: TypeAlias = pyresample.geometry.BaseDefinition
+"""A 4-tuple of `(x_min, y_min, x_max, y_max)`"""
 Depends: TypeAlias = Union[type[DependentVariables], DependentVariables, Sequence[DependentVariables], "Dependencies"]
 ResampleInstruction: TypeAlias = "tuple[DependentDataset, AreaExtent]"
 Unit = Literal["km", "m"]
 # =====================================================================================================================
-STANDARD_SURFACE_PRESSURE = P0 = 1013.25  # - mbar
+STANDARD_SURFACE_PRESSURE = P0 = 1013.25  # - hPa
+P1 = 25.0  # - hPa
+DEFAULT_PRESSURE: ListLike[Number] = [P0, 925.0, 850.0, 700.0, 500.0, 300.0]  # - hPa
 DERIVED_SURFACE_COORDINATE = {LVL: (LVL.axis, [STANDARD_SURFACE_PRESSURE])}
-DEFAULT_PRESSURE: ListLike[Number] = [P0, 925.0, 850.0, 700.0, 500.0, 300.0]
-MESOSCALE_BETA = 200.0  # km
+"""If the Dataset does not contain a vertical coordinate, it is assumed to be a derived atmospheric parameter
+or near surface paramter. The vertical coordinate is then set to the standard surface pressure of 1013.25 hPa."""
+MESOSCALE_BETA = 200.0  # - km
 
-P1 = 25.0  # - mbar
-# ERA5_GRID_RESOLUTION = 30.0  # km / px
-# RATE = ERA5_GRID_RESOLUTION / 2
-# URMA_GRID_RESOLUTION = 2.5  # km / px
-# CHANNELS = "channels"
-# VARIABLES = "variable"
 _units: Mapping[Unit, float] = {"km": 1.0, "m": 1000.0}
 _GRID_DEFINITION = "grid_definition"
 _DEPENDS = "depends"
@@ -96,16 +93,16 @@ class Dependencies:
     def __init__(self, depends: Depends):
         self.enum, self.depends = self._validate_variables(depends)
 
-    @property
-    def difference(self) -> set[DependentVariables]:
-        return self.enum.difference(self.depends)
-
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}({self.enum.__name__})"
 
     @property
+    def difference(self) -> set[DependentVariables]:
+        return self.enum.difference(self.depends)
+
+    @property
     def names(self) -> pd.Index[str]:
-        return self.enum._names
+        return self.enum._names # TODO: the enum names should not be a private attribute
 
     @property
     def crs(self) -> pyproj.CRS:
@@ -216,7 +213,7 @@ class IndependentDataset(xr.Dataset):
     def lons(self) -> xr.DataArray:
         return self[LON]
 
-
+# TODO: 
 class DependentDataset(IndependentDataset):
     __slots__ = ()
     __dims__ = (T, Z, Y, X)
@@ -228,19 +225,23 @@ class DependentDataset(IndependentDataset):
         *,
         depends: Depends | None = None,
         attrs: Mapping[str, Any] | None = None,
-    ):
+    ) -> None:
+        # TODO:
+        # - add method to create the dataset from a 4/5d array
         if isinstance(data, DependentDataset) and attrs is None:
             attrs = {
                 _GRID_DEFINITION: data.grid_definition,
                 _DEPENDS: data.depends,
             }
         super().__init__(data, attrs=attrs)
-        if depends is not None:
+        if depends is not None: # TODO: these 2 conditionas can be consilidated
             self.attrs[_DEPENDS] = depends
 
         if _GRID_DEFINITION not in self.attrs:
             lons, lats = (self[x].to_numpy() for x in (LON, LAT))
-            lons = (lons + 180.0) % 360 - 180.0
+            lons = (lons + 180.0) % 360 - 180.0 
+            # TODO: need to write a test for this and insure
+            # the lons are in the range of -180 to 180
             self.attrs[_GRID_DEFINITION] = pyresample.geometry.GridDefinition(lons, lats)
         assert is_independent(self)
 
@@ -284,13 +285,15 @@ class Mesoscale(Data[NDArray[np.float_]]):
         troposphere: ListLike[Number] | None = None,
     ) -> None:
         super().__init__()
-        # descending pressure
-        tropo = sort_unique(self._arange() if troposphere is None else troposphere, descending=True).astype(np.float_)
-        self._hpa = hpa = sort_unique(pressure, descending=True).astype(np.float_)
+        # - descending pressure
+        tropo = np.asarray(
+            sort_unique(self._arange() if troposphere is None else troposphere, descending=True), dtype=np.float_
+        )
+        self._hpa = hpa = np.asarray(sort_unique(pressure, descending=True), dtype=np.float_)
         if not all(np.isin(hpa, tropo)):
             raise ValueError(f"pressure {hpa} must be a subset of troposphere {tropo}")
 
-        # ascending scale
+        # - ascending scale
         mask = np.isin(tropo, hpa)
         self._scale = scale = log_scale(tropo, rate=rate)[::-1][mask]
         self._dx, self._dy = scale[np.newaxis] * np.array([[dx], [dy or dx]])
@@ -345,6 +348,9 @@ class Mesoscale(Data[NDArray[np.float_]]):
     def __array__(self) -> Array[[N, N2], np.float_]:
         return self.to_numpy()
 
+    def __len__(self) -> int:
+        return len(self.hpa)
+
     def to_pandas(self) -> pd.DataFrame:
         return pd.DataFrame(self.to_dict()).set_index("hpa").sort_index()
 
@@ -359,6 +365,8 @@ class Mesoscale(Data[NDArray[np.float_]]):
         return ReSampler(_instruction_iterator(self, *dsets), height=height, width=width)
 
 
+# =====================================================================================================================
+# TODO: the projection section can be improved
 _laea = {
     "proj": "laea",
     "x_0": 0,
@@ -426,17 +434,18 @@ def area_definition(
     )
 
 
+# =====================================================================================================================
 class ReSampler:
     def __init__(
         self,
-        it: Iterator[ResampleInstruction],
+        instruction: Iterator[ResampleInstruction],
         /,
         *,
         height: int = 80,
         width: int = 80,
         target_projection: str = "lambert_azimuthal_equal_area",
     ) -> None:
-        self._instruction = iter(it)
+        self._instruction = iter(instruction)
         self.height = height
         self.width = width
         self.target_projection = _projection_map[target_projection]
@@ -490,3 +499,5 @@ class ReSampler:
         return pyresample.kd_tree.resample_nearest(
             source, data=ds.to_stacked_array("C", [Y, X]).to_numpy(), target_geo_def=target, radius_of_influence=500000
         )
+
+# TODO: need to add the DataWorker, DataConsumer implementation's

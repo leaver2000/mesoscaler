@@ -25,24 +25,24 @@ from ._typing import (
 from .generic import Loc as _Loc
 from .utils import is_scalar, join_kv
 
-LOC = "__mesometa_loc__"
-CLASS_METADATA = "__mesometa_cls_data__"
-MEMBER_METADATA = "__mesometa_member_data__"
-MEMBER_ALIASES = "__mesometa_member_aliases__"
-MEMBER_SERIES = "__mesometa_series__"
-
-_Item: TypeAlias = np.generic | bool | int | float | complex | str | bytes | memoryview | enum.Enum | Hashable
 _ENUM_DICT_RESERVED_KEYS = (
     "__doc__",
     "__module__",
     "__qualname__",
-    #
     "_order_",
     "_create_pseudo_member_",
     "_generate_next_value_",
     "_missing_",
     "_ignore_",
 )
+
+CLASS_LOC = "__mesometa_loc__"
+CLASS_METADATA = "__mesometa_cls_data__"
+MEMBER_METADATA = "__mesometa_member_data__"
+MEMBER_ALIASES = "__mesometa_member_aliases__"
+MEMBER_SERIES = "__mesometa_series__"
+
+_Item: TypeAlias = np.generic | bool | int | float | complex | str | bytes | memoryview | enum.Enum | Hashable
 
 
 MemberMetadata: TypeAlias = MutableMapping[str, Any]
@@ -123,10 +123,10 @@ def _repack_info(
         {
             "name": name,
             CLASS_METADATA: class_metadata,
+            CLASS_LOC: _Loc(list, member_series),
             MEMBER_METADATA: member_metadata,
             MEMBER_ALIASES: aliases,
             MEMBER_SERIES: member_series,
-            LOC: _Loc(list, member_series),
         }
     )
 
@@ -174,7 +174,7 @@ class _EnumMetaCls(enum.EnumMeta):
 
     @property
     def loc(cls) -> _Loc[list[VariableEnum]]:
-        return cls.__metadata__[LOC]
+        return cls.__metadata__[CLASS_LOC]
 
     @property
     def _series(cls) -> pd.Series[Any]:

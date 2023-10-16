@@ -80,7 +80,6 @@ all = [
     "cartopy",
     "black",
     "jupyter-black",
-
 ]
 
 [tool.setuptools]
