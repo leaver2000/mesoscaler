@@ -29,6 +29,7 @@ from ._typing import (
     N,
     NDArray,
     Number,
+    Callable,
     PointOverTime,
     Self,
     Sequence,
@@ -56,6 +57,7 @@ from .enums import (
 from .generic import Data, DataWorker
 from .utils import area_definition, log_scale, slice_time, sort_unique
 
+Nv = NewType("Nv", int)
 Nx = NewType("Nx", int)
 Ny = NewType("Ny", int)
 Nt = NewType("Nt", int)
@@ -435,7 +437,7 @@ def _get_partial_method(
     nprocs=1,
     segments=None,
     with_uncert: bool = False,
-) -> functools.partial[Array[[Nx, Ny, N], np.float_]]:
+) -> Callable[[GridDefinition, Array[[Ny, Nx, N], np.float_], AreaDefinition], Array[[Ny, Nx, N], np.float_]]:
     if method == "nearest":
         func = pyresample.kd_tree.resample_nearest
         kwargs = dict(
@@ -511,12 +513,19 @@ class ReSampler(AbstractInstruction):
 
     def _resample_point_over_time(
         self, longitude: Longitude, latitude: Latitude, time: Slice[np.datetime64]
-    ) -> list[Array[[Nx, Ny, N], np.float_]]:
+    ) -> list[Array[[Ny, Nx, N], np.float_]]:
+        """resample the data along the vertical scale for a single point over time.
+        each item in the list is a 3-d array that can be stacked into along the vertical axis.
+
+        The variables and Time are stacked into `N`.
+        """
         area_definition = self._partial_area_definition(longitude, latitude)
 
         return [
             self._resample_method(
                 ds.grid_definition,
+                # TODO: it would probably be beneficial to slice the data before resampling
+                # to prevent loading all of th lat_lon data into memory
                 ds.sel({TIME: time}).to_stacked_array("C", [Y, X]).to_numpy(),
                 area_definition(area_extent=area_extent),
             )
@@ -525,8 +534,9 @@ class ReSampler(AbstractInstruction):
 
     def __call__(
         self, longitude: Longitude, latitude: Latitude, time: TimeSlice
-    ) -> Array[[N, Nt, Nz, Ny, Nx], np.float_]:
-        arr: Array[[Nz, Ny, Nx, N], np.float_] = np.stack(self._resample_point_over_time(longitude, latitude, time))
+    ) -> Array[[Nv, Nt, Nz, Ny, Nx], np.float_]:
+        """stack the data along `Nz` and reshape and unsqueeze the data to match the expected output."""
+        arr = np.stack(self._resample_point_over_time(longitude, latitude, time))  # (z, y, x, v*t)
 
         # - reshape the data
         t = len(self.slice_time(time))
@@ -565,7 +575,7 @@ class ArrayWorker(DataWorker[PointOverTime, Array[[N, N, N, N, N], np.float_]], 
     def instruction(self) -> _Instruction:
         return self.sampler._instruction
 
-    def __getitem__(self, idx: PointOverTime) -> Array[[N, N, N, N, N], np.float_]:
+    def __getitem__(self, idx: PointOverTime) -> Array[[Nv, Nt, Nz, Ny, Nx], np.float_]:
         (lon, lat), time = idx
         return self.sampler(lon, lat, time)
 
