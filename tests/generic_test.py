@@ -1,7 +1,7 @@
 import typing
 
-from src.mesoscaler.generic import DataMapping, Dataset
 from src.mesoscaler._typing import get_first_order_generic
+from src.mesoscaler.generic import DataMapping, Dataset
 
 
 class MyDataset(Dataset[int]):
