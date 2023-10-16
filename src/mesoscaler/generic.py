@@ -2,13 +2,13 @@
 from __future__ import annotations
 
 import abc
-import bisect
 import itertools
 import queue
 import random
 import threading
 from typing import ForwardRef
 
+from ._compat import ChainDataset, ConcatDataset, Dataset, IterableDataset  # noqa
 from ._typing import (
     Any,
     AnyArrayLike,
@@ -28,7 +28,7 @@ from ._typing import (
     get_first_order_generic,
     overload,
 )
-from .utils import acc_size, is_array_like, join_kv
+from .utils import is_array_like, join_kv
 
 _T = TypeVar("_T")
 
@@ -111,69 +111,6 @@ class Data(NamedAndSized, Generic[_T], abc.ABC):
 
 
 # =====================================================================================================================
-#
-# =====================================================================================================================
-class Dataset(NamedAndSized, Generic[_T], abc.ABC):
-    @abc.abstractmethod
-    def __getitem__(self, index: int) -> _T:
-        ...
-
-    def __add__(self, other: Dataset[_T]) -> ConcatDataset[_T]:
-        return ConcatDataset([self, other])
-
-
-class ConcatDataset(Dataset[_T]):
-    def __init__(self, data: Iterable[Dataset[_T]]) -> None:
-        super().__init__()
-        self.data = data = list(data)
-        if not data:
-            raise ValueError("datasets should not be an empty iterable")
-        for ds in data:
-            if isinstance(ds, IterableDataset):
-                raise ValueError("ConcatDataset does not support IterableDataset")
-
-        self.accumulated_sizes = list(acc_size(data))
-
-    def __len__(self) -> int:
-        return self.accumulated_sizes[-1]
-
-    def __getitem__(self, idx: int) -> _T:
-        if idx < 0:
-            if -idx > len(self):
-                raise ValueError("absolute value of index should not exceed dataset length")
-            idx += len(self)
-
-        if ds_idx := bisect.bisect_right(self.accumulated_sizes, idx):
-            idx -= self.accumulated_sizes[ds_idx - 1]
-
-        return self.data[ds_idx][idx]
-
-
-# =====================================================================================================================
-#
-# =====================================================================================================================
-class IterableDataset(NamedAndSized, Generic[_T], abc.ABC):
-    @abc.abstractmethod
-    def __iter__(self) -> Iterator[_T]:
-        ...
-
-    def __add__(self, other: IterableDataset[_T]) -> ChainDataset[_T]:
-        return ChainDataset([self, other])
-
-
-class ChainDataset(IterableDataset[_T]):
-    def __init__(self, datasets: Iterable[IterableDataset[_T]]) -> None:
-        super().__init__()
-        self.data: Final[Iterable[IterableDataset[_T]]] = datasets
-
-    def __iter__(self) -> Iterator[_T]:
-        return itertools.chain.from_iterable(self.data)
-
-    def __len__(self) -> int:
-        return sum(map(len, self.data))
-
-
-# =====================================================================================================================
 # - Mappings
 # =====================================================================================================================
 class DataMapping(NamedAndSized, Mapping[HashableT, _T]):
@@ -243,7 +180,7 @@ class DataWorker(NamedAndSized, Mapping[HashableT, _T], abc.ABC):
 # =====================================================================================================================
 #
 # =====================================================================================================================
-class DataConsumer(IterableDataset[_T], Generic[HashableT, _T]):
+class DataConsumer(NamedAndSized, IterableDataset[_T], Generic[HashableT, _T]):
     def __init__(self, worker: Mapping[HashableT, _T], *, maxsize: int = 0, timeout: float | None = None) -> None:
         super().__init__()
         self.thread: Final[threading.Thread] = threading.Thread(target=self._target, name=self.name, daemon=True)
