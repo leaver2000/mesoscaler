@@ -28,6 +28,8 @@ from collections.abc import Sequence
 
 import numpy as np
 import pandas as pd
+import pyproj
+import pyresample.geometry
 import toml
 from pandas._typing import DtypeObj
 
@@ -39,10 +41,11 @@ except (NameError, ImportError):
         import tqdm  # type: ignore
     except ImportError:
         tqdm = None  # type: ignore
-# from ._torch_compat import Tensor
+
 from ._typing import (
     Any,
     AnyArrayLike,
+    AreaExtent,
     Array,
     Callable,
     Hashable,
@@ -58,6 +61,7 @@ from ._typing import (
     Sequence,
     Sized,
     StrPath,
+    TimeSlice,
     TypeGuard,
     TypeVar,
     overload,
@@ -72,6 +76,9 @@ LiteralNoDefault = Literal[__NoDefault.NoDefault]
 del __NoDefault
 
 
+# =====================================================================================================================
+# - logic
+# =====================================================================================================================
 def is_ipython() -> bool:
     try:
         get_ipython  # type: ignore
@@ -113,8 +120,41 @@ def is_array_like(x: Any) -> TypeGuard[AnyArrayLike]:
 
 
 # =====================================================================================================================
+# - projection utils
+# =====================================================================================================================
+def area_definition(
+    width: float,
+    height: float,
+    projection: pyproj.CRS,
+    area_extent: AreaExtent,
+    lons: NDArray[np.float_] | None = None,
+    lats: NDArray[np.float_] | None = None,
+    dtype: Any = np.float_,
+    area_id: str = "undefined",
+    description: str = "undefined",
+    proj_id: str = "undefined",
+    nprocs: int = 1,
+) -> pyresample.geometry.AreaDefinition:
+    return pyresample.geometry.AreaDefinition(
+        area_id,
+        description,
+        proj_id,
+        width=width,
+        height=height,
+        projection=projection,
+        area_extent=area_extent,
+        lons=lons,
+        lats=lats,
+        dtype=dtype,
+        nprocs=nprocs,
+    )
+
+
+# =====================================================================================================================
 # - array/tensor utils
 # =====================================================================================================================
+def mask_time(t: Array[[N], np.datetime64], s: TimeSlice, /) -> Array[[N], np.datetime64]:
+    return t[(s.start <= t) | (t <= s.stop)]
 
 
 def normalize(x: NDArray[np.number[Any]]) -> NDArray[np.float_]:
@@ -246,7 +286,7 @@ _array2string = functools.partial(
 )
 
 
-def _repr_generator(*args: tuple[str, Any]):
+def _repr_generator(*args: tuple[str, Any]) -> Iterator[str]:
     prefix = "- "
     k, _ = zip(*args)
     width = max(map(len, k))
@@ -381,8 +421,6 @@ def squish_map(__func: Callable[[_T1], _T2], __iterable: _T1 | Iterable[_T1], /,
 # =====================================================================================================================
 # - mapping utils
 # =====================================================================================================================
-
-
 def nested_proxy(data: Mapping[str, Any]) -> types.MappingProxyType[str, Any]:
     return types.MappingProxyType({k: nested_proxy(v) if isinstance(v, Mapping) else v for k, v in data.items()})
 

@@ -13,7 +13,6 @@ from ._typing import (
     Any,
     AnyArrayLike,
     Callable,
-    DictStrAny,
     Final,
     Generic,
     Hashable,
@@ -26,14 +25,12 @@ from ._typing import (
     Self,
     Sized,
     TypeVar,
-    TypeVarTuple,
     get_first_order_generic,
     overload,
 )
 from .utils import acc_size, is_array_like, join_kv
 
 _T = TypeVar("_T")
-_Ts = TypeVarTuple("_Ts")
 
 
 class NamedAndSized(Sized, abc.ABC):
@@ -113,12 +110,6 @@ class Data(NamedAndSized, Generic[_T], abc.ABC):
         return dict(self.data)
 
 
-class MappingBase(NamedAndSized, Mapping[HashableT, _T], abc.ABC):
-    @property
-    def data(self) -> Iterable[tuple[HashableT, _T]]:
-        return self.items()
-
-
 # =====================================================================================================================
 #
 # =====================================================================================================================
@@ -173,7 +164,7 @@ class IterableDataset(NamedAndSized, Generic[_T], abc.ABC):
 class ChainDataset(IterableDataset[_T]):
     def __init__(self, datasets: Iterable[IterableDataset[_T]]) -> None:
         super().__init__()
-        self.data = datasets
+        self.data: Final[Iterable[IterableDataset[_T]]] = datasets
 
     def __iter__(self) -> Iterator[_T]:
         return itertools.chain.from_iterable(self.data)
@@ -185,7 +176,7 @@ class ChainDataset(IterableDataset[_T]):
 # =====================================================================================================================
 # - Mappings
 # =====================================================================================================================
-class DataMapping(MappingBase[HashableT, _T]):
+class DataMapping(NamedAndSized, Mapping[HashableT, _T]):
     def __init__(self, data: Mapping[HashableT, _T]) -> None:
         super().__init__()
         self._data = dict(data)
@@ -199,12 +190,15 @@ class DataMapping(MappingBase[HashableT, _T]):
     def __len__(self) -> int:
         return len(self._data)
 
+    def __or__(self, other: DataMapping[HashableT, _T] | dict[HashableT, _T]) -> DataMapping[HashableT, _T]:
+        return DataMapping(self._data | (other._data if isinstance(other, DataMapping) else other))
 
-class DataWorker(MappingBase[HashableT, _T]):
+
+class DataWorker(NamedAndSized, Mapping[HashableT, _T], abc.ABC):
     def __init__(self, indices: Iterable[HashableT], **config: Any) -> None:
         super().__init__()
         self.indices: Final[list[HashableT]] = list(indices)
-        self.config: Final[DictStrAny] = config
+        self.attrs: Final[DataMapping[str, Any]] = DataMapping(config)
 
     @abc.abstractmethod
     def __getitem__(self, key: HashableT) -> _T:
@@ -227,7 +221,7 @@ class DataWorker(MappingBase[HashableT, _T]):
     @property
     def name(self) -> str:
         name = super().name
-        if split_name := self.config.get("split_name", None):
+        if split_name := self.attrs.get("split_name", None):
             name += f"[{split_name}]"
         return name
 
@@ -236,8 +230,8 @@ class DataWorker(MappingBase[HashableT, _T]):
         n = int(len(self) * frac)
         left, right = self.indices[:n], self.indices[n:]
         return (
-            cls(indices=left, **self.config | {"split_name": split_names[0]}),
-            cls(indices=right, **self.config | {"split_name": split_names[1]}),
+            cls(indices=left, **self.attrs | {"split_name": split_names[0]}),
+            cls(indices=right, **self.attrs | {"split_name": split_names[1]}),
         )
 
     def shuffle(self, *, seed: int) -> Self:
@@ -282,6 +276,7 @@ class DataConsumer(IterableDataset[_T], Generic[HashableT, _T]):
 _AnyArrayLikeT = TypeVar("_AnyArrayLikeT", bound=AnyArrayLike)
 
 
+# TODO: this need work
 class Loc(Generic[_AnyArrayLikeT]):
     def __init__(
         self,
