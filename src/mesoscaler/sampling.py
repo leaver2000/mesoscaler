@@ -87,16 +87,19 @@ class DatasetIntersection:
 class AbstractBaseSampler(DataSampler[PointOverTime], abc.ABC):
     _product: list[PointOverTime] | None
 
+    @classmethod
+    def from_datasets(cls, *dsets: DependentDataset, **kwargs: Any) -> Self:
+        return cls(DatasetIntersection.create(*dsets), **kwargs)
+
     def __init__(
         self,
-        __datasets: Iterator[DependentDataset] | DependentDataset,
-        *dsets: DependentDataset,
+        intersection: DatasetIntersection,
         lon_lat_frequency: int = 100,
         time_frequency: TimeFrequency = "h",
         time_step: int = 1,
     ) -> None:
         super().__init__()
-        self.intersection = DatasetIntersection.create(__datasets, *dsets)
+        self.intersection = intersection
         self.lon_lat_frequency = lon_lat_frequency
         self.time_step = time_step
         self.time_frequency = time_frequency
