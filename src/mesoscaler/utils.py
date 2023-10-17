@@ -25,11 +25,9 @@ import urllib.parse
 from collections.abc import Sequence
 
 import numpy as np
-import pandas as pd
 import pyproj
 import pyresample.geometry
 import toml
-from pandas.api.types import is_datetime64_any_dtype as is_datetime
 
 try:
     get_ipython  # type: ignore

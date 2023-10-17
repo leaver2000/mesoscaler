@@ -12,6 +12,7 @@ import pandas as pd
 from ._typing import (
     AreaExtent,
     Array,
+    Iterable,
     Iterator,
     Literal,
     N,
@@ -22,13 +23,14 @@ from ._typing import (
 )
 from .core import DependentDataset
 from .generic import DataSampler
+from .utils import repr_
 
 LiteralKey = Literal["lon", "lat", "time"]
 TimeFrequency = Literal["h"]
 
 
 @dataclasses.dataclass(frozen=True)
-class DatasetIntersection:
+class Intersection:
     min_lon: float
     max_lon: float
     min_lat: float
@@ -37,12 +39,7 @@ class DatasetIntersection:
     max_time: np.datetime64
 
     @classmethod
-    def create(cls, __datasets: Iterator[DependentDataset] | DependentDataset, *dsets: DependentDataset):
-        datasets = itertools.chain(tuple(__datasets if isinstance(__datasets, Iterator) else [__datasets]), dsets)
-        return cls(*cls.chain_intersection(datasets))  # type: ignore[arg-type]
-
-    @classmethod
-    def chain_intersection(cls, __datasets: itertools.chain[DependentDataset]) -> itertools.chain[Any]:
+    def create_from_datasets(cls, __datasets: Iterable[DependentDataset]) -> Self:
         lons = []
         lats = []
         time = []
@@ -52,7 +49,8 @@ class DatasetIntersection:
             lats.append(ds.lats.to_numpy())
             time.append(ds.time.to_numpy())
 
-        return itertools.chain(cls._min_max(lons), cls._min_max(lats), cls._min_max(time))
+        chain = itertools.chain.from_iterable(map(cls._min_max, (lons, lats, time)))
+        return cls(*chain)
 
     @staticmethod
     def _min_max(arr: list[np.ndarray]) -> tuple[Any, Any]:
@@ -87,19 +85,15 @@ class DatasetIntersection:
 class AbstractBaseSampler(DataSampler[PointOverTime], abc.ABC):
     _product: list[PointOverTime] | None
 
-    @classmethod
-    def from_datasets(cls, *dsets: DependentDataset, **kwargs: Any) -> Self:
-        return cls(DatasetIntersection.create(*dsets), **kwargs)
-
     def __init__(
         self,
-        intersection: DatasetIntersection,
+        datasets: Iterable[DependentDataset],
         lon_lat_frequency: int = 100,
         time_frequency: TimeFrequency = "h",
         time_step: int = 1,
     ) -> None:
         super().__init__()
-        self.intersection = intersection
+        self.intersection = Intersection.create_from_datasets(datasets)
         self.lon_lat_frequency = lon_lat_frequency
         self.time_step = time_step
         self.time_frequency = time_frequency
@@ -156,8 +150,6 @@ class AbstractBaseSampler(DataSampler[PointOverTime], abc.ABC):
         return len(self.product)
 
     def __repr__(self) -> str:
-        from .utils import repr_
-
         product = "\n".join(repr_(self.product, map_values=True))
         return f"{type(self).__name__}[\n{product}\n]"
 
@@ -165,14 +157,13 @@ class AbstractBaseSampler(DataSampler[PointOverTime], abc.ABC):
 class LinearSampler(AbstractBaseSampler):
     def __init__(
         self,
-        __datasets: Iterator[DependentDataset] | DependentDataset,
-        *dsets: DependentDataset,
+        datasets: Iterable[DependentDataset],
         lon_lat_frequency: int = 100,
         time_frequency: TimeFrequency = "h",
         time_step: int = 1,
     ) -> None:
         super().__init__(
-            __datasets, *dsets, time_frequency=time_frequency, time_step=time_step, lon_lat_frequency=lon_lat_frequency
+            datasets, time_frequency=time_frequency, time_step=time_step, lon_lat_frequency=lon_lat_frequency
         )
 
     def get_lon_lats(self) -> tuple[Array[[N], np.float_], Array[[N], np.float_]]:
@@ -192,15 +183,15 @@ class ExtentBoundLinearSampler(LinearSampler):
 
     def __init__(
         self,
-        __datasets: Iterator[DependentDataset] | DependentDataset,
-        *dsets: DependentDataset,
+        datasets: Iterable[DependentDataset],
         lon_lat_frequency: int = 100,
         time_frequency: TimeFrequency = "h",
         time_step: int = 1,
+        *,
         area_extent: tuple[float, float, float, float] | AreaExtent,
     ) -> None:
         super().__init__(
-            __datasets, *dsets, time_frequency=time_frequency, time_step=time_step, lon_lat_frequency=lon_lat_frequency
+            datasets, time_frequency=time_frequency, time_step=time_step, lon_lat_frequency=lon_lat_frequency
         )
         self.area_extent = area_extent
 
