@@ -50,6 +50,7 @@ from ._typing import (
     Hashable,
     Iterable,
     Iterator,
+    ListLike,
     Literal,
     N,
     NDArray,
@@ -270,11 +271,11 @@ class Representation(str):
 
     @classmethod
     def join_(cls, sep: str, iterable: Iterable[Any], *, none: Any = None) -> str:
-        return sep.join(cls.map_(iterable, none=none))
+        return sep.join(cls.map_(iter(iterable), none=none))
 
     @classmethod
     def slice_(cls, s: slice) -> str:
-        return cls.join_(":", [s.start, s.stop, s.step], none="")
+        return cls.join_(":", [s.start, s.stop, s.step])
 
     @classmethod
     def generic_alias_(cls, x: types.GenericAlias) -> str:
@@ -291,15 +292,15 @@ class Representation(str):
 
         return left + cls.join_(", ", x) + right
 
-    def __new__(cls, x: Any, *, none: Any = None, datetime_format="%Y-%m-%dT%H:%M:%SZ") -> Representation:
+    def __new__(cls, x: Any, *, none: Any = None) -> Representation:
         if isinstance(x, Representation):
             return x
         elif isinstance(x, str):
             pass
+        elif isinstance(x, np.datetime64):
+            x = np.datetime_as_string(x, unit="s") + "Z"
         elif isinstance(x, slice):
             x = cls.slice_(x)
-        elif is_datetime(x):
-            x = pd.to_datetime(x).strftime(datetime_format)
         elif np.isscalar(x):
             x = repr(x)
         elif isinstance(x, np.ndarray):
@@ -370,12 +371,12 @@ def sort_unique(
 
 
 @overload
-def sort_unique(__x: Sequence[Number_T], /, *, descending=False) -> list[Number_T]:
+def sort_unique(__x: ListLike[Number_T], /, *, descending=False) -> list[Number_T]:
     ...
 
 
 def sort_unique(
-    __x: Sequence[Number_T] | Array[[...], NumpyNumber_T],
+    __x: ListLike[Number_T] | Sequence[Number_T] | Array[[...], NumpyNumber_T],
     /,
     *,
     descending=False,

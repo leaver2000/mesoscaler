@@ -9,16 +9,32 @@ __all__ = [
     "IterableDataset",
     "ConcatDataset",
     "ChainDataset",
+    "BatchSampler",
+    "Sampler",
+    "SequentialSampler",
 ]
 try:
     from torch.utils.data import ChainDataset, ConcatDataset, Dataset, IterableDataset
+    from torch.utils.data.sampler import BatchSampler, Sampler, SequentialSampler
 except ImportError:
     import bisect
     import warnings
-    from typing import Generic, Iterable, Iterator, List, TypeVar
+    from typing import (
+        Generic,
+        Iterable,
+        Iterator,
+        List,
+        Optional,
+        Sized,
+        TypeVar,
+        Union,
+    )
 
     T_co = TypeVar("T_co", covariant=True)
 
+    # =================================================================================================================
+    # torch.utils.data.sampler
+    # =================================================================================================================
     class Dataset(Generic[T_co]):
         def __getitem__(self, index) -> T_co:
             raise NotImplementedError("Subclasses of Dataset should implement __getitem__.")
@@ -92,3 +108,77 @@ except ImportError:
                 assert isinstance(d, IterableDataset), "ChainDataset only supports IterableDataset"
                 total += len(d)  # type: ignore[arg-type]
             return total
+
+    # =================================================================================================================
+    # torch.utils.data.sampler
+    # =================================================================================================================
+    class Sampler(Generic[T_co]):
+        def __init__(self, data_source: Optional[Sized] = None) -> None:
+            if data_source is not None:
+                import warnings
+
+                warnings.warn(
+                    "`data_source` argument is not used and will be removed in 2.2.0."
+                    "You may still have custom implementation that utilizes it."
+                )
+
+        def __iter__(self) -> Iterator[T_co]:
+            raise NotImplementedError
+
+    class SequentialSampler(Sampler[int]):
+        data_source: Sized
+
+        def __init__(self, data_source: Sized) -> None:
+            self.data_source = data_source
+
+        def __iter__(self) -> Iterator[int]:
+            return iter(range(len(self.data_source)))
+
+        def __len__(self) -> int:
+            return len(self.data_source)
+
+    class BatchSampler(Sampler[List[int]]):
+        def __init__(self, sampler: Union[Sampler[int], Iterable[int]], batch_size: int, drop_last: bool) -> None:
+            # Since collections.abc.Iterable does not check for `__getitem__`, which
+            # is one way for an object to be an iterable, we don't do an `isinstance`
+            # check here.
+            if not isinstance(batch_size, int) or isinstance(batch_size, bool) or batch_size <= 0:
+                raise ValueError(f"batch_size should be a positive integer value, but got batch_size={batch_size}")
+            if not isinstance(drop_last, bool):
+                raise ValueError(f"drop_last should be a boolean value, but got drop_last={drop_last}")
+            self.sampler = sampler
+            self.batch_size = batch_size
+            self.drop_last = drop_last
+
+        def __iter__(self) -> Iterator[List[int]]:
+            # Implemented based on the benchmarking in https://github.com/pytorch/pytorch/pull/76951
+            if self.drop_last:
+                sampler_iter = iter(self.sampler)
+                while True:
+                    try:
+                        batch = [next(sampler_iter) for _ in range(self.batch_size)]
+                        yield batch
+                    except StopIteration:
+                        break
+            else:
+                batch = [0] * self.batch_size
+                idx_in_batch = 0
+                for idx in self.sampler:
+                    batch[idx_in_batch] = idx
+                    idx_in_batch += 1
+                    if idx_in_batch == self.batch_size:
+                        yield batch
+                        idx_in_batch = 0
+                        batch = [0] * self.batch_size
+                if idx_in_batch > 0:
+                    yield batch[:idx_in_batch]
+
+        def __len__(self) -> int:
+            # Can only be called if self.sampler has __len__ implemented
+            # We cannot enforce this condition, so we turn off typechecking for the
+            # implementation below.
+            # Somewhat related: see NOTE [ Lack of Default `__len__` in Python Abstract Base Classes ]
+            if self.drop_last:
+                return len(self.sampler) // self.batch_size  # type: ignore[arg-type]
+            else:
+                return (len(self.sampler) + self.batch_size - 1) // self.batch_size  # type: ignore[arg-type]

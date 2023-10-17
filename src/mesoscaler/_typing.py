@@ -121,7 +121,7 @@ _T_co = TypeVar("_T_co", bound=Any, covariant=True)
 _T_contra = TypeVar("_T_contra", bound=Any, covariant=True)
 _Numpy_T_co = TypeVar("_Numpy_T_co", bound=np.generic, covariant=True)
 NumpyNumber_T = TypeVar("NumpyNumber_T", bound=np.number)
-Number_T = TypeVar("Number_T", bound="Number")
+Number_T = TypeVar("Number_T", bound="Number", covariant=True)
 NumpyDType_T = TypeVar("NumpyDType_T", bound=np.dtype[Any])
 PandasDType_T = TypeVar(
     "PandasDType_T",
@@ -257,8 +257,7 @@ AnyArrayLike: TypeAlias = Union[
     list[PandasDType_T],
 ]
 
-ListLike: TypeAlias = Sequence[_T_co] | Iterable[_T_co]
-#
+ListLike: TypeAlias = Sequence[_T_co] | Iterator[_T_co]
 AreaExtent: TypeAlias = Array[[N4], np.float_]
 """A 4-tuple of `(x_min, y_min, x_max, y_max)`"""
 Longitude: TypeAlias = float
