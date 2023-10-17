@@ -1,13 +1,37 @@
 """A mix of Abstract Base Classes and Generic Data Adapters for various data structures."""
 from __future__ import annotations
 
+__all__ = [
+    "NamedAndSized",
+    "Data",
+    "DataMapping",
+    "DataWorker",
+    "DataConsumer",
+    "Loc",
+    # - torch.utils.data
+    "Dataset",
+    "IterableDataset",
+    "ConcatDataset",
+    "ChainDataset",
+    "BatchSampler",
+    "Sampler",
+    "SequentialSampler",
+]
 import abc
 import itertools
 import queue
 import random
 import threading
 
-from ._compat import ChainDataset, ConcatDataset, Dataset, IterableDataset  # noqa
+from ._compat import (  # noqa
+    BatchSampler,
+    ChainDataset,
+    ConcatDataset,
+    Dataset,
+    IterableDataset,
+    Sampler,
+    SequentialSampler,
+)
 from ._typing import (
     Any,
     AnyArrayLike,
@@ -90,6 +114,17 @@ class Data(NamedAndSized, Generic[_T], abc.ABC):
 
 
 # =====================================================================================================================
+# - Iterables
+# =====================================================================================================================
+class DataSampler(
+    NamedAndSized,
+    Sampler[HashableT],
+    abc.ABC,
+):
+    ...
+
+
+# =====================================================================================================================
 # - Mappings
 # =====================================================================================================================
 class DataMapping(NamedAndSized, Mapping[HashableT, _T]):
@@ -131,7 +166,6 @@ class DataWorker(NamedAndSized, Mapping[HashableT, _T], abc.ABC):
         size = self.size
         keys = repr_(self.indices, map_values=True)
         data = repr_(get_first_order_generic(self)[-1])
-
         text = join_kv(f"{name}({size=}):", *zip(keys, itertools.repeat(data)), start=0, stop=5)
         return text
 
@@ -158,13 +192,13 @@ class DataWorker(NamedAndSized, Mapping[HashableT, _T], abc.ABC):
 
 
 # =====================================================================================================================
-#
+# - DataConsumer
 # =====================================================================================================================
 class DataConsumer(NamedAndSized, IterableDataset[_T], Generic[HashableT, _T]):
     def __init__(self, worker: Mapping[HashableT, _T], *, maxsize: int = 0, timeout: float | None = None) -> None:
         super().__init__()
         self.thread: Final[threading.Thread] = threading.Thread(target=self._target, name=self.name, daemon=True)
-        self.queue: Final[queue.Queue[_T]] = queue.Queue[_T](maxsize=maxsize)
+        self.queue: Final[queue.Queue[_T]] = queue.Queue(maxsize=maxsize)
         self.worker: Final[Mapping[HashableT, _T]] = worker
         self.timeout: Final[float | None] = timeout
 

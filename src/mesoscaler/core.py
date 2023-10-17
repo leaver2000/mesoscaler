@@ -126,6 +126,10 @@ class Dependencies:
     def metadata(self) -> Mapping[str, Any]:
         return self.enum.metadata  # type: ignore
 
+    @property
+    def name(self) -> str:
+        return self.enum.name
+
 
 def is_dimension_independent(dims: Iterable[Hashable]) -> bool:
     return all(isinstance(dim, Dimensions) for dim in dims) and set(dims) == set(Dimensions)
@@ -304,7 +308,7 @@ class Mesoscale(Data[NDArray[np.float_]]):
         *,
         p0: float = P0,
         p1=P1,
-    ) -> ListLike[Number]:
+    ) -> Sequence[float]:
         return [p0, *range(start, stop, step), p1]
 
     @classmethod
@@ -559,7 +563,7 @@ class ArrayWorker(DataWorker[PointOverTime, Array[[N, N, N, N, N], np.float_]], 
         super().__init__(
             indices,
             hpa=scale.hpa,
-            sampler=scale.resample(
+            resampler=scale.resample(
                 *dsets,
                 height=height,
                 width=width,
@@ -569,7 +573,7 @@ class ArrayWorker(DataWorker[PointOverTime, Array[[N, N, N, N, N], np.float_]], 
 
     @property
     def sampler(self) -> ReSampler:
-        return self.attrs["sampler"]
+        return self.attrs["resampler"]
 
     @property
     def instruction(self) -> _Instruction:
