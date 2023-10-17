@@ -58,6 +58,7 @@ __all__ = [
 import datetime
 import os
 import sys
+import typing
 from typing import (
     TYPE_CHECKING,
     Annotated,
@@ -110,6 +111,7 @@ from numpy._typing._nested_sequence import _NestedSequence as NestedSequence
 from pandas._typing import Dtype
 from pandas.core.arrays.base import ExtensionArray
 
+GenericAliasType: type[types.GenericAlias] = getattr(typing, "_GenericAlias", types.GenericAlias)
 Undefined = enum.Enum("Undefined", names="_", module=__name__)
 
 # =====================================================================================================================
@@ -118,6 +120,8 @@ _T = TypeVar("_T", bound=Any)
 _T_co = TypeVar("_T_co", bound=Any, covariant=True)
 _T_contra = TypeVar("_T_contra", bound=Any, covariant=True)
 _Numpy_T_co = TypeVar("_Numpy_T_co", bound=np.generic, covariant=True)
+NumpyNumber_T = TypeVar("NumpyNumber_T", bound=np.number)
+Number_T = TypeVar("Number_T", bound="Number")
 NumpyDType_T = TypeVar("NumpyDType_T", bound=np.dtype[Any])
 PandasDType_T = TypeVar(
     "PandasDType_T",
@@ -173,7 +177,7 @@ StrPath: TypeAlias = "str | os.PathLike[str]"
 # - numpy
 Int: TypeAlias = int | np.integer[Any]
 Float: TypeAlias = float | np.floating[Any]
-Number: TypeAlias = Int | Float
+Number: TypeAlias = int | float
 Boolean: TypeAlias = bool | np.bool_
 
 # - pandas

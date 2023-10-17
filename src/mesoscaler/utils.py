@@ -16,8 +16,6 @@ __all__ = [
     "load_toml",
     "tqdm",
 ]
-import collections
-import datetime
 import enum
 import functools
 import itertools
@@ -31,11 +29,11 @@ import pandas as pd
 import pyproj
 import pyresample.geometry
 import toml
-from pandas._typing import DtypeObj
+from pandas.api.types import is_datetime64_any_dtype as is_datetime
 
 try:
     get_ipython  # type: ignore
-    import tqdm.notebook as tqdm
+    import tqdm.notebook as tqdm  # pyright: ignore
 except (NameError, ImportError):
     try:
         import tqdm  # type: ignore
@@ -48,16 +46,18 @@ from ._typing import (
     AreaExtent,
     Array,
     Callable,
+    GenericAliasType,
     Hashable,
     Iterable,
     Iterator,
-    ListLike,
     Literal,
-    Mapping,
     N,
     NDArray,
-    NumberT,
+    NewType,
+    Number_T,
+    NumpyNumber_T,
     Pair,
+    Self,
     Sequence,
     Sized,
     StrPath,
@@ -200,31 +200,6 @@ def log_scale(x: NDArray[np.number[Any]], rate: float = 1.0) -> NDArray[np.float
     return normalized_scale(np.log(x), rate=rate)
 
 
-def sortunique(x: ListLike[_T1], descending=False) -> NDArray[_T1]:
-    """
-    Sorts the elements of the input array `x` in ascending order and removes any duplicates.
-
-    Parameters
-    ----------
-    x : ListLike[_T1]
-        The input array to be sorted and made unique.
-
-    Returns
-    -------
-    NDArray[_T1]
-        A new array containing the sorted, unique elements of `x`.
-
-    Examples
-    --------
-    >>> sort_unique([3, 1, 4, 1, 5, 9, 2, 6, 5, 3, 5])
-    array([1, 2, 3, 4, 5, 6, 9])
-    """
-    a = np.sort(np.unique(np.asanyarray(x)))
-    if descending:
-        a = a[::-1]
-    return a
-
-
 def square_space(in_size: int, out_size: int) -> tuple[Pair[Array[[N], Any]], Pair[Array[[N, N], Any]]]:
     """
     >>> points, values = squarespace(4, 6)
@@ -249,10 +224,7 @@ def square_space(in_size: int, out_size: int) -> tuple[Pair[Array[[N], Any]], Pa
 
 
 def interp_frames(
-    arr: Array[[N, N, ...], _T1],
-    *,
-    img_size: int = 256,
-    method: str = "linear",
+    arr: Array[[N, N, ...], _T1], *, img_size: int = 256, method: str = "linear"
 ) -> Array[[N, N, ...], _T1]:
     """
     Interpolate the first two equally shaped dimensions of an array to the new `patch_size`.
@@ -279,27 +251,91 @@ def interp_frames(
 # =====================================================================================================================
 # - repr utils
 # =====================================================================================================================
-_array2string = functools.partial(
-    np.array2string,
-    max_line_width=100,
-    precision=2,
-    separator=" ",
-    floatmode="fixed",
-)
 
 
-def _repr_generator(*args: tuple[str, Any]) -> Iterator[str]:
-    prefix = "- "
+class Representation(str):
+    array_ = staticmethod(
+        functools.partial(
+            np.array2string,
+            max_line_width=100,
+            precision=2,
+            separator=" ",
+            floatmode="fixed",
+        )
+    )
+
+    @classmethod
+    def map_(cls, x: Iterable[Any], *, none: Any = None) -> map[Self]:
+        return map(lambda x: cls(x, none=none), x)
+
+    @classmethod
+    def join_(cls, sep: str, iterable: Iterable[Any], *, none: Any = None) -> str:
+        return sep.join(cls.map_(iterable, none=none))
+
+    @classmethod
+    def slice_(cls, s: slice) -> str:
+        return cls.join_(":", [s.start, s.stop, s.step], none="")
+
+    @classmethod
+    def generic_alias_(cls, x: types.GenericAlias) -> str:
+        return f"{x.__origin__.__name__}[{cls.join_(', ', cls.map_(x.__args__))}]"
+
+    @classmethod
+    def sequence_(cls, x: Sequence[Any]) -> str:
+        if isinstance(x, tuple):
+            left, right = "(", ")"
+        elif isinstance(x, list):
+            left, right = "[", "]"
+        else:
+            left, right = "{", "}"
+
+        return left + cls.join_(", ", x) + right
+
+    def __new__(cls, x: Any, *, none: Any = None, datetime_format="%Y-%m-%dT%H:%M:%SZ") -> Representation:
+        if isinstance(x, Representation):
+            return x
+        elif isinstance(x, str):
+            pass
+        elif isinstance(x, slice):
+            x = cls.slice_(x)
+        elif is_datetime(x):
+            x = pd.to_datetime(x).strftime(datetime_format)
+        elif np.isscalar(x):
+            x = repr(x)
+        elif isinstance(x, np.ndarray):
+            x = cls.array_(x)
+        elif isinstance(x, Sequence):
+            x = cls.sequence_(x)
+        elif x is ...:
+            x = "..."
+        elif isinstance(x, (types.GenericAlias, GenericAliasType)):
+            x = cls.generic_alias_(x)
+        elif x is None:
+            x = none
+        elif isinstance(x, (type, NewType)):
+            x = getattr(x, "__name__", repr(x))
+        return super().__new__(cls, x)
+
+
+# repr_: Final = Representation
+@overload
+def repr_(x: Any, *, none: Any = None, map_values: Literal[False] = False) -> Representation:
+    ...
+
+
+@overload
+def repr_(x: Iterable[Any], *, none: Any = None, map_values: Literal[True]) -> map[Representation]:
+    ...
+
+
+def repr_(x: Any, *, none: Any = None, map_values: bool = False) -> Representation | map[Representation]:
+    return Representation.map_(x, none=none) if map_values else Representation(x, none=none)
+
+
+def _repr_generator(*args: tuple[str, Any], prefix: str = "- ") -> Iterator[str]:
     k, _ = zip(*args)
     width = max(map(len, k))
-    for key, value in args:
-        key = f"{prefix}{key.rjust(width)}: "
-        if isinstance(value, np.ndarray):
-            value = _array2string(value, prefix=key)
-
-        else:
-            value = repr(value)
-        yield f"{key}{value}"
+    return (f"{prefix}{key.rjust(width)}: {repr_(value)}" for key, value in args)
 
 
 def join_kv(
@@ -326,15 +362,47 @@ def join_kv(
     return sep.join([head, text])
 
 
-def sort_unique(x: Iterable[NumberT], descending=False) -> list[NumberT]:
-    return sorted(set(x), reverse=descending)  # type: ignore
+@overload
+def sort_unique(
+    __x: Array[[...], NumpyNumber_T], /, *, descending=False, axis: int | None = None
+) -> Array[[...], NumpyNumber_T]:
+    ...
+
+
+@overload
+def sort_unique(__x: Sequence[Number_T], /, *, descending=False) -> list[Number_T]:
+    ...
+
+
+def sort_unique(
+    __x: Sequence[Number_T] | Array[[...], NumpyNumber_T],
+    /,
+    *,
+    descending=False,
+    axis: int | None = None,
+) -> list[Number_T] | Array[[...], NumpyNumber_T]:
+    x = (
+        np.sort(
+            np.unique(
+                __x,
+                return_index=False,
+                return_inverse=False,
+                return_counts=False,
+                axis=axis,
+            )
+        )
+        if isinstance(__x, np.ndarray)
+        else sorted(set(__x))
+    )  # type: list[Number_T] | Array[[...], NumpyNumber_T]
+
+    if descending:
+        x = x[::-1]
+    return x
 
 
 # =====================================================================================================================
 # - list utils
 # =====================================================================================================================
-
-
 def arange_slice(
     start: int, stop: int | None, rows: int | None, ppad: int | None, step: int | None = None
 ) -> list[slice]:
@@ -418,53 +486,6 @@ def squish_map(__func: Callable[[_T1], _T2], __iterable: _T1 | Iterable[_T1], /,
     """
 
     return map(__func, squish_chain(__iterable, *args))
-
-
-# =====================================================================================================================
-# - mapping utils
-# =====================================================================================================================
-def nested_proxy(data: Mapping[str, Any]) -> types.MappingProxyType[str, Any]:
-    return types.MappingProxyType({k: nested_proxy(v) if isinstance(v, Mapping) else v for k, v in data.items()})
-
-
-dtype_map = types.MappingProxyType(
-    collections.defaultdict(
-        lambda: pd.api.types.pandas_dtype("object"),
-        {
-            str: pd.api.types.pandas_dtype("string[pyarrow]"),
-            datetime.datetime: pd.api.types.pandas_dtype("datetime64[ns]"),
-            datetime.date: pd.api.types.pandas_dtype("datetime64[ns]"),
-            datetime.time: pd.api.types.pandas_dtype("datetime64[ns]"),
-            datetime.timedelta: pd.api.types.pandas_dtype("timedelta64[ns]"),
-        }
-        | {x: pd.api.types.pandas_dtype(x) for x in (int, float, bool, complex, bytes, memoryview)},
-    )
-)
-
-
-def get_enum_dtype(x: enum.Enum | type[enum.Enum]) -> DtypeObj:
-    """Resolve the dtype of an enum.
-
-    Args:
-        x (type[enum.Enum]): The enum to resolve.
-
-    Returns:
-        DtypeObj: The dtype of the enum.
-    """
-    if not isinstance(x, type):
-        x = type(x)
-    keys_ = dtype_map.keys()
-    if type_ := find(lambda t: t in keys_, x.mro(), default=None):
-        return dtype_map[type_]
-
-    return pd.api.types.pandas_dtype("category")
-
-
-def get_pandas_dtype(x) -> DtypeObj:
-    if isinstance(x, enum.Enum) or (isinstance(x, type) and issubclass(x, enum.Enum)):
-        return get_enum_dtype(x)
-
-    return pd.api.types.pandas_dtype(x)
 
 
 # =====================================================================================================================

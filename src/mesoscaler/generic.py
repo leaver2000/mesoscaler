@@ -6,7 +6,6 @@ import itertools
 import queue
 import random
 import threading
-from typing import ForwardRef
 
 from ._compat import ChainDataset, ConcatDataset, Dataset, IterableDataset  # noqa
 from ._typing import (
@@ -28,7 +27,7 @@ from ._typing import (
     get_first_order_generic,
     overload,
 )
-from .utils import is_array_like, join_kv
+from .utils import is_array_like, join_kv, repr_
 
 _T = TypeVar("_T")
 
@@ -43,26 +42,6 @@ class NamedAndSized(Sized, abc.ABC):
     @property
     def size(self) -> int:
         return len(self)
-
-
-class GenericRepresentation:
-    def __init__(self, x: Any) -> None:
-        x = get_first_order_generic(x)[-1]
-        if isinstance(x, ForwardRef):
-            x = x.__forward_arg__
-
-        self.x = (
-            str(x)
-            .replace(getattr(x, "__module__", "") + ".", "")
-            .replace(f"{__package__}.", "")
-            .replace("__main__.", "")
-            .replace("_typing.", "")
-            .replace("typing.", "")
-            .replace("Ellipsis", "...")
-        )
-
-    def __repr__(self) -> str:
-        return self.x
 
 
 # =====================================================================================================================
@@ -150,9 +129,10 @@ class DataWorker(NamedAndSized, Mapping[HashableT, _T], abc.ABC):
     def __repr__(self) -> str:
         name = self.name
         size = self.size
-        # because we're lazily loading data we can attempt to use the type annotation of _T class as the representation
-        data = GenericRepresentation(self)
-        text = join_kv(f"{name}({size=}):", *zip(self.indices, itertools.repeat(data)), start=0, stop=5)
+        keys = repr_(self.indices, map_values=True)
+        data = repr_(get_first_order_generic(self)[-1])
+
+        text = join_kv(f"{name}({size=}):", *zip(keys, itertools.repeat(data)), start=0, stop=5)
         return text
 
     @property
