@@ -14,6 +14,7 @@ from ._typing import (
     N4,
     Any,
     Array,
+    Callable,
     Hashable,
     Iterable,
     ListLike,
@@ -43,8 +44,9 @@ from .enums import (
     Y,
     Z,
 )
-from .generic import Data, DataWorker
+from .generic import Data, DataGenerator, DataWorker
 from .sampling.resampler import AbstractInstructor, ReSampleInstructor, ReSampler
+from .sampling.sampler import LinearSampler
 from .utils import log_scale, sort_unique
 
 Nv = NewType("Nv", int)
@@ -380,10 +382,10 @@ class ArrayProducer(DataWorker[TimeSlicePoint, Array[[N, N, N, N, N], np.float_]
         height: int = 80,
         width: int = 80,
         target_projection: LiteralCRS = "lambert_azimuthal_equal_area",
+        method: str = "nearest",
     ) -> None:
         super().__init__(
             indices,
-            hpa=scale.hpa,
             resampler=scale.resample(
                 *dsets,
                 height=height,
@@ -420,3 +422,136 @@ class ArrayProducer(DataWorker[TimeSlicePoint, Array[[N, N, N, N, N], np.float_]
 
     def get_dataset(self, idx: TimeSlicePoint, /) -> xr.Dataset:
         return self.get_array(idx).to_dataset(_VARIABLES)
+
+
+# =====================================================================================================================
+def open_datasets(
+    paths: Iterable[tuple[str, Depends]],
+    *,
+    levels: ListLike[Number] | None = None,
+    # x: Mapping[Dimensions, Sequence[Any]],
+) -> Iterable[DependentDataset]:
+    for path, depends in paths:
+        ds = DependentDataset.from_zarr(path, depends)
+        if levels is not None:
+            ds = ds.sel({LVL: ds.level.isin(levels)})
+        yield ds
+
+
+def create_resampler(
+    dsets: Iterable[DependentDataset],
+    dx: float = 200,
+    dy: float | None = None,
+    start: int = 1000,
+    stop: int = 25 - 1,
+    step: int = -25,
+    p0: float = P0,
+    p1: float = P1,
+    rate: float = 1,
+    pressure: ListLike[Number] = DEFAULT_PRESSURE,
+    height: int = 80,
+    width: int = 80,
+    target_projection: LiteralCRS = "lambert_azimuthal_equal_area",
+    method: str = "nearest",
+) -> ReSampler:
+    scale = Mesoscale.arange(
+        dx=dx,
+        dy=dy,
+        start=start,
+        stop=stop,
+        step=step,
+        p0=p0,
+        p1=p1,
+        rate=rate,
+        pressure=pressure,
+    )
+    return scale.resample(*dsets, height=height, width=width, target_projection=target_projection, method=method)
+
+
+def data_generator(
+    dsets: Iterable[DependentDataset],
+    indices: Iterable[TimeSlicePoint]
+    | Callable[[Iterable[DependentDataset]], Iterable[TimeSlicePoint]] = LinearSampler,
+    *,
+    dx: float = 200,
+    dy: float | None = None,
+    start: int = 1000,
+    stop: int = 25 - 1,
+    step: int = -25,
+    p0: float = P0,
+    p1: float = P1,
+    rate: float = 1,
+    pressure: ListLike[Number] = DEFAULT_PRESSURE,
+    height: int = 80,
+    width: int = 80,
+    target_projection: LiteralCRS = "lambert_azimuthal_equal_area",
+    method: str = "nearest",
+    # - data consumer -
+    maxsize: int = 0,
+    timeout: float | None = None,
+    **sampler_kwargs: Any,
+) -> DataGenerator[Array[[N, N, N, N, N], np.float_]]:
+    scale = Mesoscale.arange(
+        dx=dx,
+        dy=dy,
+        start=start,
+        stop=stop,
+        step=step,
+        p0=p0,
+        p1=p1,
+        rate=rate,
+        pressure=pressure,
+    )
+    if callable(indices):
+        dsets = list(dsets)  # don't want to exhaust the iterator
+        indices = indices(dsets, **sampler_kwargs)
+
+    producer = ArrayProducer(
+        indices, *dsets, scale=scale, height=height, width=width, target_projection=target_projection, method=method
+    )
+    return DataGenerator(producer, maxsize=maxsize, timeout=timeout)
+
+
+def pipeline(
+    paths: Iterable[tuple[str, Depends]],
+    indices: Iterable[TimeSlicePoint] | Callable[..., Iterable[TimeSlicePoint]] = LinearSampler,
+    *,
+    dx: float = 200,
+    dy: float | None = None,
+    start: int = 1000,
+    stop: int = 25 - 1,
+    step: int = -25,
+    p0: float = P0,
+    p1: float = P1,
+    rate: float = 1,
+    pressure: ListLike[Number] = DEFAULT_PRESSURE,
+    height: int = 80,
+    width: int = 80,
+    target_projection: LiteralCRS = "lambert_azimuthal_equal_area",
+    method: str = "nearest",
+    # - data consumer -
+    maxsize: int = 0,
+    timeout: float | None = None,
+    **sampler_kwargs: Any,
+):
+    datasets = open_datasets(paths, levels=pressure)
+    return data_generator(
+        datasets,
+        indices,
+        dx=dx,
+        dy=dy,
+        start=start,
+        stop=stop,
+        step=step,
+        p0=p0,
+        p1=p1,
+        rate=rate,
+        pressure=pressure,
+        height=height,
+        width=width,
+        target_projection=target_projection,
+        method=method,
+        maxsize=maxsize,
+        timeout=timeout,
+        **sampler_kwargs,
+    )

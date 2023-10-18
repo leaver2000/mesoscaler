@@ -135,6 +135,8 @@ class TimeSampler(AbstractSampler):
     def __init__(
         self,
         datasets: Iterable[DependentDataset],
+        /,
+        *,
         time_frequency: TimeFrequencyLike = TimeFrequency("hour"),
         time_step: int = 1,
     ) -> None:
@@ -166,6 +168,8 @@ class LinearSampler(TimeSampler):
     def __init__(
         self,
         datasets: Iterable[DependentDataset],
+        /,
+        *,
         lon_lat_frequency: int = 100,
         time_frequency: TimeFrequencyLike = "h",
         time_step: int = 1,
@@ -181,25 +185,26 @@ class LinearSampler(TimeSampler):
         )
 
 
-class ExtentBoundLinearSampler(TimeSampler):
+class BoundedBoxSampler(TimeSampler):
     """`x_min, y_min, x_max, y_max = area_extent`"""
 
     def __init__(
         self,
         datasets: Iterable[DependentDataset],
+        /,
+        *,
         lon_lat_frequency: int = 100,
         time_frequency: TimeFrequencyLike = TimeFrequency("hour"),
         time_step: int = 1,
-        *,
-        area_extent: tuple[float, float, float, float] | AreaExtent,
+        bbox: tuple[float, float, float, float] | AreaExtent = (-120, 30.0, -70, 25.0),
     ) -> None:
         super().__init__(datasets, time_frequency=time_frequency, time_step=time_step)
-        self.area_extent = area_extent
+        self.bbox = bbox
         self.lon_lat_frequency = lon_lat_frequency
 
     def get_lon_lats(self) -> tuple[Array[[N], np.float_], Array[[N], np.float_]]:
         frequency = self.lon_lat_frequency
-        x_min, y_min, x_max, y_max = self.area_extent
+        x_min, y_min, x_max, y_max = self.bbox
         if self.intersection.min_lat > y_min or self.intersection.max_lat < y_max:
             raise ValueError(f"area_extent latitude bounds {y_min, y_max} are outside dataset bounds")
         elif self.intersection.min_lon > x_min or self.intersection.max_lon < x_max:

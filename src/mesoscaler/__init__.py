@@ -1,8 +1,16 @@
-from .core import ArrayProducer, DependentDataset, Mesoscale
+from .core import (
+    ArrayProducer,
+    DependentDataset,
+    Mesoscale,
+    create_resampler,
+    data_generator,
+    open_datasets,
+    pipeline,
+)
 from .enums import ERA5, LAT, LON, LVL, TIME, URMA, X, Y, Z
-from .generic import DataConsumer
+from .generic import DataGenerator
 from .sampling.resampler import ReSampler
-from .sampling.sampler import ExtentBoundLinearSampler, LinearSampler
+from .sampling.sampler import BoundedBoxSampler, LinearSampler
 
 __all__ = [
     # - core -
@@ -10,10 +18,10 @@ __all__ = [
     "DependentDataset",
     "ArrayProducer",
     # - generic -
-    "DataConsumer",
+    "DataGenerator",
     # - sampling -
     "LinearSampler",
-    "ExtentBoundLinearSampler",
+    "BoundedBoxSampler",
     "ReSampler",
     # - enums -
     "URMA",
@@ -27,4 +35,8 @@ __all__ = [
     "LVL",
     "LAT",
     "LON",
+    "data_generator",
+    "open_datasets",
+    "pipeline",
+    "create_resampler",
 ]

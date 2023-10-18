@@ -9,6 +9,7 @@ from pyresample.geometry import AreaDefinition, GridDefinition
 
 from .._typing import (
     TYPE_CHECKING,
+    Any,
     AreaExtent,
     Array,
     Callable,
@@ -29,9 +30,6 @@ if TYPE_CHECKING:
 ResampleInstruction: TypeAlias = tuple["DependentDataset", AreaExtent]
 
 
-# =====================================================================================================================
-#
-# =====================================================================================================================
 class AbstractInstructor(abc.ABC):
     @property
     @abc.abstractmethod
@@ -81,42 +79,43 @@ class ReSampleInstructor(Iterable[ResampleInstruction], AbstractInstructor):
         return self
 
 
-def _get_partial_method(
-    method,
-    sigmas=[1.0],
+def _get_resample_method(
+    method: str,
     radius_of_influence=500000,
     fill_value=0,
     reduce_data=True,
     nprocs=1,
     segments=None,
+    # - gauss -
+    sigmas=[1.0],
     with_uncert: bool = False,
+    neighbors: int = 8,
+    epsilon: int = 0,
 ) -> Callable[[GridDefinition, Array[[Ny, Nx, N], np.float_], AreaDefinition], Array[[Ny, Nx, N], np.float_]]:
+    kwargs = dict(
+        radius_of_influence=radius_of_influence,
+        fill_value=fill_value,
+        reduce_data=reduce_data,
+        nprocs=nprocs,
+        segments=segments,
+    )
     if method == "nearest":
         func = pyresample.kd_tree.resample_nearest
-        kwargs = dict(
-            radius_of_influence=radius_of_influence,
-            fill_value=fill_value,
-            reduce_data=reduce_data,
-            nprocs=nprocs,
-            segments=segments,
-        )
+
     elif method == "gauss":
         func = pyresample.kd_tree.resample_gauss
-        kwargs = dict(
-            sigmas=sigmas,
-            radius_of_influence=radius_of_influence,
-            fill_value=fill_value,
-            reduce_data=reduce_data,
-            nprocs=nprocs,
-            segments=segments,
-            with_uncert=with_uncert,
-        )
+        kwargs |= dict(sigmas=sigmas, with_uncert=with_uncert, neighbours=neighbors, epsilon=epsilon)
     else:
         raise ValueError(f"method {method} is not supported!")
     return functools.partial(func, **kwargs)
 
 
 class ReSampler(AbstractInstructor):
+    # There are alot of callbacks and partial methods in this class.
+    @property
+    def instructor(self) -> ReSampleInstructor:
+        return self._instructor
+
     def __init__(
         self,
         instructor: ReSampleInstructor,
@@ -127,13 +126,14 @@ class ReSampler(AbstractInstructor):
         target_projection: LiteralCRS = "lambert_azimuthal_equal_area",
         method: str = "nearest",
         sigmas=[1.0],
-        radius_of_influence=500000,
-        fill_value=0,
-        reduce_data=True,
-        nprocs=1,
-        segments=None,
+        radius_of_influence: int = 500000,
+        fill_value: int = 0,
+        reduce_data: bool = True,
+        nprocs: int = 1,
+        segments: Any = None,
         with_uncert: bool = False,
     ) -> None:
+        super().__init__()
         self._instructor = instructor
         self.height = height
         self.width = width
@@ -141,7 +141,7 @@ class ReSampler(AbstractInstructor):
             CoordinateReferenceSystem[target_projection] if isinstance(target_projection, str) else target_projection
         )
 
-        self._resample_method = _get_partial_method(
+        self._resample_method = _get_resample_method(
             method,
             radius_of_influence=radius_of_influence,
             fill_value=fill_value,
@@ -151,10 +151,6 @@ class ReSampler(AbstractInstructor):
             with_uncert=with_uncert,
             sigmas=sigmas,
         )
-
-    @property
-    def instructor(self) -> ReSampleInstructor:
-        return self._instructor
 
     def _partial_area_definition(self, longitude: Longitude, latitude: Latitude) -> functools.partial[AreaDefinition]:
         return functools.partial(

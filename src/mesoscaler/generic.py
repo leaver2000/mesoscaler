@@ -6,7 +6,7 @@ __all__ = [
     "Data",
     "DataMapping",
     "DataWorker",
-    "DataConsumer",
+    "DataGenerator",
     # - torch.utils.data
     "Dataset",
     "IterableDataset",
@@ -186,9 +186,9 @@ class DataWorker(NamedAndSized, Mapping[HashableT, _T], abc.ABC):
 
 
 # =====================================================================================================================
-# - DataConsumer
+# - DataGenerator
 # =====================================================================================================================
-class DataConsumer(NamedAndSized, IterableDataset[_T]):
+class DataGenerator(NamedAndSized, IterableDataset[_T]):
     def __init__(
         self,
         worker: Mapping[HashableT, _T] | Mapping[HashableT, _T],
