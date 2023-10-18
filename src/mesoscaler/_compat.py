@@ -13,14 +13,20 @@ __all__ = [
     "Sampler",
     "SequentialSampler",
 ]
+import typing
+
 try:
-    import torch
+    import torch  # noqa
+
+    _has_torch = True
 except ImportError:
-    torch = None
-if torch is not None:
+    _has_torch = False
+
+if _has_torch:
     from torch.utils.data import ChainDataset, ConcatDataset, Dataset, IterableDataset
     from torch.utils.data.sampler import BatchSampler, Sampler, SequentialSampler
-else:
+
+elif not _has_torch and not typing.TYPE_CHECKING:
     import bisect
     import warnings
     from typing import (

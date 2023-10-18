@@ -30,11 +30,10 @@ from ._typing import (
     N,
     NDArray,
     Number,
-    PointOverTime,
     Self,
     Sequence,
-    Slice,
     TimeSlice,
+    TimeSlicePoint,
     TypeAlias,
     Union,
 )
@@ -516,7 +515,7 @@ class ReSampler(AbstractInstruction):
         )
 
     def _resample_point_over_time(
-        self, longitude: Longitude, latitude: Latitude, time: Slice[np.datetime64]
+        self, longitude: Longitude, latitude: Latitude, time: TimeSlice
     ) -> list[Array[[Ny, Nx, N], np.float_]]:
         """resample the data along the vertical scale for a single point over time.
         each item in the list is a 3-d array that can be stacked into along the vertical axis.
@@ -550,10 +549,10 @@ class ReSampler(AbstractInstruction):
 
 
 # =====================================================================================================================
-class ArrayWorker(DataWorker[PointOverTime, Array[[N, N, N, N, N], np.float_]], AbstractInstruction):
+class ArrayWorker(DataWorker[TimeSlicePoint, Array[[N, N, N, N, N], np.float_]], AbstractInstruction):
     def __init__(
         self,
-        indices: Iterable[PointOverTime],
+        indices: Iterable[TimeSlicePoint],
         *dsets: DependentDataset,
         scale: Mesoscale,
         height: int = 80,
@@ -579,13 +578,13 @@ class ArrayWorker(DataWorker[PointOverTime, Array[[N, N, N, N, N], np.float_]], 
     def instruction(self) -> _Instruction:
         return self.sampler._instruction
 
-    def __getitem__(self, idx: PointOverTime) -> Array[[Nv, Nt, Nz, Ny, Nx], np.float_]:
-        (lon, lat), time = idx
+    def __getitem__(self, idx: TimeSlicePoint) -> Array[[Nv, Nt, Nz, Ny, Nx], np.float_]:
+        time, (lon, lat) = idx
         return self.sampler(lon, lat, time)
 
-    def get_array(self, idx: PointOverTime, /) -> xr.DataArray:
+    def get_array(self, idx: TimeSlicePoint, /) -> xr.DataArray:
         data = self[idx]
-        _, time = idx
+        time, _ = idx
 
         return xr.DataArray(
             data,
@@ -597,5 +596,5 @@ class ArrayWorker(DataWorker[PointOverTime, Array[[N, N, N, N, N], np.float_]], 
             },
         )
 
-    def get_dataset(self, idx: PointOverTime, /) -> xr.Dataset:
+    def get_dataset(self, idx: TimeSlicePoint, /) -> xr.Dataset:
         return self.get_array(idx).to_dataset(_VARIABLES)

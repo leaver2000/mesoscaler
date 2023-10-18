@@ -3,7 +3,6 @@ from __future__ import annotations
 import abc
 import dataclasses
 import itertools
-import random
 from typing import Any
 
 import numpy as np
@@ -17,9 +16,9 @@ from ._typing import (
     Literal,
     N,
     Point,
-    PointOverTime,
     Self,
     TimeSlice,
+    TimeSlicePoint,
 )
 from .core import DependentDataset
 from .generic import DataSampler
@@ -82,41 +81,29 @@ class Intersection:
         return value
 
 
-class AbstractBaseSampler(DataSampler[PointOverTime], abc.ABC):
-    _product: list[PointOverTime] | None
+class AbstractSampler(DataSampler[TimeSlicePoint], abc.ABC):
+    _indices: list[TimeSlicePoint] | None
 
     def __init__(
         self,
-        datasets: Iterable[DependentDataset],
-        lon_lat_frequency: int = 100,
-        time_frequency: TimeFrequency = "h",
-        time_step: int = 1,
+        intersection: Intersection,
     ) -> None:
         super().__init__()
-        self.intersection = Intersection.create_from_datasets(datasets)
-        self.lon_lat_frequency = lon_lat_frequency
-        self.time_step = time_step
-        self.time_frequency = time_frequency
-        self._product = None
+        self.intersection = intersection
+        self._indices = None
+
+    # =================================================================================================================
+    @property
+    def indices(self) -> list[TimeSlicePoint]:
+        if self._indices is None:
+            self._indices = indices = list(self.iter_indices())
+            return indices
+        return self._indices
 
     @property
-    def product(self) -> list[PointOverTime]:
-        if self._product is None:
-            self._product = product = list(self.iter_product())
-            return product
-        return self._product
-
-    def shuffle(self, *, seed: int) -> Self:
-        product = self.product
-        random.seed(seed)
-        random.shuffle(product)
-        self._product = product
-
-        return self
-
-    @property
+    @abc.abstractmethod
     def timedelta64(self) -> np.timedelta64:
-        return np.timedelta64(self.time_step, self.time_frequency)
+        ...
 
     # =================================================================================================================
     @abc.abstractmethod
@@ -139,22 +126,48 @@ class AbstractBaseSampler(DataSampler[PointOverTime], abc.ABC):
         lons, lats = self.get_lon_lats()
         return ((x, y) for x in lons for y in lats)
 
-    def iter_product(self) -> Iterator[PointOverTime]:
-        return itertools.product(self.iter_points(), self.iter_time())
+    def iter_indices(self) -> Iterator[TimeSlicePoint]:
+        return itertools.product(self.iter_time(), self.iter_points())
 
     # =================================================================================================================
-    def __iter__(self) -> Iterator[PointOverTime]:
-        return self.iter_product()
+    def __iter__(self) -> Iterator[TimeSlicePoint]:
+        return self.iter_indices()
 
     def __len__(self) -> int:
-        return len(self.product)
+        return len(self.indices)
 
     def __repr__(self) -> str:
-        product = "\n".join(repr_(self.product, map_values=True))
-        return f"{type(self).__name__}[\n{product}\n]"
+        indices = "\n".join(repr_(self.indices, map_values=True))
+        return f"{type(self).__name__}[\n{indices}\n]"
 
 
-class LinearSampler(AbstractBaseSampler):
+class LinearTimeSampler(AbstractSampler):
+    _product: list[TimeSlicePoint] | None
+
+    def __init__(
+        self,
+        datasets: Iterable[DependentDataset],
+        lon_lat_frequency: int = 100,
+        time_frequency: TimeFrequency = "h",
+        time_step: int = 1,
+    ) -> None:
+        super().__init__(Intersection.create_from_datasets(datasets))
+
+        self.lon_lat_frequency = lon_lat_frequency
+        self.time_step = time_step
+        self.time_frequency = time_frequency
+
+    @property
+    def timedelta64(self) -> np.timedelta64:
+        return np.timedelta64(self.time_step, self.time_frequency)
+
+    def get_time(self) -> Array[[N], np.datetime64]:
+        return pd.date_range(
+            self.intersection.min_time, self.intersection.max_time, freq=self.time_frequency
+        ).to_numpy()
+
+
+class LinearSampler(LinearTimeSampler):
     def __init__(
         self,
         datasets: Iterable[DependentDataset],
@@ -173,12 +186,12 @@ class LinearSampler(AbstractBaseSampler):
             self.intersection.linspace("lat", frequency=frequency),
         )
 
-    def get_time(self) -> Array[[N], np.datetime64]:
-        frequency = self.time_frequency
-        return self.intersection.linspace("time", frequency=frequency)  # type: ignore[arg-type]
+    # def get_time(self) -> Array[[N], np.datetime64]:
+    #     frequency = self.time_frequency
+    #     return self.intersection.linspace("time", frequency=frequency)  # type: ignore[arg-type]
 
 
-class ExtentBoundLinearSampler(LinearSampler):
+class ExtentBoundLinearSampler(LinearTimeSampler):
     """`x_min, y_min, x_max, y_max = area_extent`"""
 
     def __init__(

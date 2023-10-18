@@ -194,8 +194,14 @@ class DataWorker(NamedAndSized, Mapping[HashableT, _T], abc.ABC):
 # =====================================================================================================================
 # - DataConsumer
 # =====================================================================================================================
-class DataConsumer(NamedAndSized, IterableDataset[_T], Generic[HashableT, _T]):
-    def __init__(self, worker: Mapping[HashableT, _T], *, maxsize: int = 0, timeout: float | None = None) -> None:
+class DataConsumer(NamedAndSized, IterableDataset[_T]):
+    def __init__(
+        self,
+        worker: Mapping[HashableT, _T] | Mapping[HashableT, _T],
+        *,
+        maxsize: int = 0,
+        timeout: float | None = None,
+    ) -> None:
         super().__init__()
         self.thread: Final[threading.Thread] = threading.Thread(target=self._target, name=self.name, daemon=True)
         self.queue: Final[queue.Queue[_T]] = queue.Queue(maxsize=maxsize)
