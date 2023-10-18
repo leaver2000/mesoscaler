@@ -13,17 +13,21 @@ import pyproj
 
 from ._typing import (
     Any,
+    AnyArrayLike,
+    Callable,
+    Generic,
     Hashable,
     HashableT,
     Iterable,
     Mapping,
     MutableMapping,
     NamedTuple,
+    NumpyDType_T,
+    PandasDType_T,
     TypeAlias,
     TypeVar,
+    overload,
 )
-from .generic import Loc as _Loc
-from .utils import is_scalar, join_kv
 
 _ENUM_DICT_RESERVED_KEYS = (
     "__doc__",
@@ -48,6 +52,8 @@ MemberMetadata: TypeAlias = MutableMapping[str, Any]
 
 
 # =====================================================================================================================
+#
+# =====================================================================================================================
 def auto_field(value: _T | Any = None, *, aliases: list[_T] | None = None, **metadata: Any) -> Any:
     """
     A factory function that creates a new field with the given value and metadata. The EnumMetaCls
@@ -62,7 +68,7 @@ def auto_field(value: _T | Any = None, *, aliases: list[_T] | None = None, **met
     Returns:
         A new field object with the given value and metadata.
     """
-    
+
     if value is None:
         value = enum.auto()
     if MEMBER_ALIASES in metadata and aliases is None:
@@ -92,6 +98,7 @@ def get_metadata() -> list[dict[str, Any]]:
 
 class _Field(NamedTuple):
     """Temporary container for field metadata."""
+
     value: Any
     metadata: Mapping[str, Any]
 
@@ -143,6 +150,36 @@ def _repack_info(
 
 
 # =====================================================================================================================
+#
+# =====================================================================================================================
+_AnyArrayLikeT = TypeVar("_AnyArrayLikeT", bound=AnyArrayLike)
+
+
+# TODO: this need work
+class _Loc(Generic[_AnyArrayLikeT]):
+    def __init__(
+        self,
+        hook: Callable[[AnyArrayLike[NumpyDType_T, PandasDType_T]], _AnyArrayLikeT],
+        data: AnyArrayLike[NumpyDType_T, PandasDType_T],
+    ) -> None:
+        self._hook = hook
+        self._data = data
+
+    @overload
+    def __getitem__(self, item: list) -> PandasDType_T | NumpyDType_T:  # pyright: ignore
+        ...
+
+    @overload
+    def __getitem__(self, item: Any) -> _AnyArrayLikeT:
+        ...
+
+    def __getitem__(self, item: Any) -> _AnyArrayLikeT | PandasDType_T | NumpyDType_T:  # type: ignore
+        from .utils import is_array_like
+
+        x = self._data[item]
+        return self._hook(x) if is_array_like(x) else x
+
+
 class _MetaDataDescriptor:
     __getitem__: Any
     _data: collections.defaultdict[int, Mapping[str, Any]]
@@ -176,6 +213,8 @@ class _EnumMetaCls(enum.EnumMeta):
         return obj
 
     def __repr__(cls) -> str:
+        from .utils import join_kv
+
         return join_kv(cls, *cls._member_map_.items())
 
     # =================================================================================================================
@@ -215,6 +254,8 @@ class _EnumMetaCls(enum.EnumMeta):
     # =================================================================================================================
     def __call__(cls, item: Iterable[_Item] | _Item) -> Any | list[Any]:  # type: ignore[override]
         """It is possible to return multiple members if the members share an alias."""
+        from .utils import is_scalar
+
         if is_scalar(item):
             return cls._scalar_lookup(item)
         return cls.loc[cls.is_in(item)]  # type: ignore

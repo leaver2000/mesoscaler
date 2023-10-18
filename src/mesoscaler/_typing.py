@@ -191,8 +191,6 @@ MaskType: TypeAlias = Union["pd.Series[bool]", "NDArray[np.bool_]", list[bool]]
 # =====================================================================================================================
 # - Protocols
 # =====================================================================================================================
-
-
 def get_first_order_generic(obj: Any, default=(Undefined,)) -> tuple[types.GenericAlias, ...] | tuple[Undefined]:
     for arg in getattr(obj, "__orig_bases__", []):
         types_ = getattr(arg, "__args__", None)
@@ -203,7 +201,7 @@ def get_first_order_generic(obj: Any, default=(Undefined,)) -> tuple[types.Gener
     return default
 
 
-class SliceLike(Protocol[_T_co]):
+class _Slice(Protocol[_T_co]):
     @property
     def start(self) -> _T_co:
         ...
@@ -217,8 +215,8 @@ class SliceLike(Protocol[_T_co]):
         ...
 
 
-Slice: TypeAlias = SliceLike[_T_co] | slice
-TimeSlice: TypeAlias = SliceLike[np.datetime64]
+Slice: TypeAlias = _Slice[_T_co] | slice
+TimeSlice: TypeAlias = Slice[np.datetime64]
 
 
 class Indices(Sized, Iterable[_T_co], Protocol[_T_co]):

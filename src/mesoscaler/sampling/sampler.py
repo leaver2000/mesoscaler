@@ -2,13 +2,14 @@ from __future__ import annotations
 
 import abc
 import dataclasses
+import datetime
 import itertools
 from typing import Any
 
 import numpy as np
-import pandas as pd
 
-from ._typing import (
+from .._typing import (
+    TYPE_CHECKING,
     AreaExtent,
     Array,
     Iterable,
@@ -20,12 +21,14 @@ from ._typing import (
     TimeSlice,
     TimeSlicePoint,
 )
-from .core import DependentDataset
-from .generic import DataSampler
-from .utils import repr_
+from ..enums import TimeFrequency, TimeFrequencyLike
+from ..generic import DataSampler
+from ..utils import repr_
+
+if TYPE_CHECKING:
+    from ..core import DependentDataset
 
 LiteralKey = Literal["lon", "lat", "time"]
-TimeFrequency = Literal["h"]
 
 
 @dataclasses.dataclass(frozen=True)
@@ -64,30 +67,16 @@ class Intersection:
     def __getitem__(self, key: LiteralKey) -> tuple[float, float]:
         return (getattr(self, f"min_{key}"), getattr(self, f"max_{key}"))
 
-    def linspace(
-        self,
-        key: LiteralKey,
-        *,
-        frequency: TimeFrequency | int,
-        round: int = 5,
-    ) -> Array[[N], Any]:
-        if key == "time" and isinstance(frequency, str):
-            return pd.date_range(self.min_time, self.max_time, freq=frequency).to_numpy()
-
+    def linspace(self, key: Literal["lon", "lat"], *, frequency: int, round: int = 5) -> Array[[N], Any]:
         assert isinstance(frequency, int), 'frequency must be an integer when key is "lon" or "lat"'
         mn, mx = self[key]
-        value = np.linspace(mn, mx, frequency).round(round)
-
-        return value
+        return np.linspace(mn, mx, frequency).round(round)
 
 
 class AbstractSampler(DataSampler[TimeSlicePoint], abc.ABC):
     _indices: list[TimeSlicePoint] | None
 
-    def __init__(
-        self,
-        intersection: Intersection,
-    ) -> None:
+    def __init__(self, intersection: Intersection) -> None:
         super().__init__()
         self.intersection = intersection
         self._indices = None
@@ -117,6 +106,7 @@ class AbstractSampler(DataSampler[TimeSlicePoint], abc.ABC):
     # =================================================================================================================
     def iter_time(self) -> Iterator[TimeSlice]:
         time_indices = self.get_time()
+
         timedelta = self.timedelta64
         mask = np.abs(time_indices.max() - time_indices) >= timedelta
 
@@ -141,43 +131,47 @@ class AbstractSampler(DataSampler[TimeSlicePoint], abc.ABC):
         return f"{type(self).__name__}[\n{indices}\n]"
 
 
-class LinearTimeSampler(AbstractSampler):
-    _product: list[TimeSlicePoint] | None
-
+class TimeSampler(AbstractSampler):
     def __init__(
         self,
         datasets: Iterable[DependentDataset],
-        lon_lat_frequency: int = 100,
-        time_frequency: TimeFrequency = "h",
+        time_frequency: TimeFrequencyLike = TimeFrequency("hour"),
         time_step: int = 1,
     ) -> None:
         super().__init__(Intersection.create_from_datasets(datasets))
-
-        self.lon_lat_frequency = lon_lat_frequency
+        self.time_frequency = TimeFrequency(time_frequency)
         self.time_step = time_step
-        self.time_frequency = time_frequency
 
     @property
     def timedelta64(self) -> np.timedelta64:
-        return np.timedelta64(self.time_step, self.time_frequency)
+        return self.time_frequency.timedelta(self.time_step)
 
     def get_time(self) -> Array[[N], np.datetime64]:
-        return pd.date_range(
-            self.intersection.min_time, self.intersection.max_time, freq=self.time_frequency
-        ).to_numpy()
+        return self.date_range(step=self.timedelta64)
+
+    def date_range(
+        self,
+        start: datetime.datetime | np.datetime64 | str | None = None,
+        stop: datetime.datetime | np.datetime64 | str | None = None,
+        step: int | datetime.timedelta | np.timedelta64 | None = None,
+    ) -> Array[[N], np.datetime64]:
+        freq = self.time_frequency
+        start = start or self.intersection.min_time
+        stop = freq.datetime(stop or self.intersection.max_time)
+        stop += freq.timedelta(1)  # end is exclusive
+        return freq.arange(start, stop, step)
 
 
-class LinearSampler(LinearTimeSampler):
+class LinearSampler(TimeSampler):
     def __init__(
         self,
         datasets: Iterable[DependentDataset],
         lon_lat_frequency: int = 100,
-        time_frequency: TimeFrequency = "h",
+        time_frequency: TimeFrequencyLike = "h",
         time_step: int = 1,
     ) -> None:
-        super().__init__(
-            datasets, time_frequency=time_frequency, time_step=time_step, lon_lat_frequency=lon_lat_frequency
-        )
+        super().__init__(datasets, time_frequency=time_frequency, time_step=time_step)
+        self.lon_lat_frequency = lon_lat_frequency
 
     def get_lon_lats(self) -> tuple[Array[[N], np.float_], Array[[N], np.float_]]:
         frequency = self.lon_lat_frequency
@@ -186,27 +180,22 @@ class LinearSampler(LinearTimeSampler):
             self.intersection.linspace("lat", frequency=frequency),
         )
 
-    # def get_time(self) -> Array[[N], np.datetime64]:
-    #     frequency = self.time_frequency
-    #     return self.intersection.linspace("time", frequency=frequency)  # type: ignore[arg-type]
 
-
-class ExtentBoundLinearSampler(LinearTimeSampler):
+class ExtentBoundLinearSampler(TimeSampler):
     """`x_min, y_min, x_max, y_max = area_extent`"""
 
     def __init__(
         self,
         datasets: Iterable[DependentDataset],
         lon_lat_frequency: int = 100,
-        time_frequency: TimeFrequency = "h",
+        time_frequency: TimeFrequencyLike = TimeFrequency("hour"),
         time_step: int = 1,
         *,
         area_extent: tuple[float, float, float, float] | AreaExtent,
     ) -> None:
-        super().__init__(
-            datasets, time_frequency=time_frequency, time_step=time_step, lon_lat_frequency=lon_lat_frequency
-        )
+        super().__init__(datasets, time_frequency=time_frequency, time_step=time_step)
         self.area_extent = area_extent
+        self.lon_lat_frequency = lon_lat_frequency
 
     def get_lon_lats(self) -> tuple[Array[[N], np.float_], Array[[N], np.float_]]:
         frequency = self.lon_lat_frequency
