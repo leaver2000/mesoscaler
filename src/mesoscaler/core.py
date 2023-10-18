@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import NewType
+import functools
 
 import numpy as np
 import pandas as pd
@@ -374,8 +375,12 @@ class Mesoscale(Data[NDArray[np.float_]]):
 
 # =====================================================================================================================
 class ArrayProducer(DataWorker[TimeSlicePoint, Array[[N, N, N, N, N], np.float_]], AbstractInstructor):
-    def __init__(
-        self,
+    def __init__(self, indices: Iterable[TimeSlicePoint], resampler: ReSampler) -> None:
+        super().__init__(indices, resampler=resampler)
+
+    @classmethod
+    def from_scale(
+        cls,
         indices: Iterable[TimeSlicePoint],
         *dsets: DependentDataset,
         scale: Mesoscale,
@@ -383,18 +388,19 @@ class ArrayProducer(DataWorker[TimeSlicePoint, Array[[N, N, N, N, N], np.float_]
         width: int = 80,
         target_projection: LiteralCRS = "lambert_azimuthal_equal_area",
         method: str = "nearest",
-    ) -> None:
-        super().__init__(
+    ):
+        return cls(
             indices,
             resampler=scale.resample(
                 *dsets,
                 height=height,
                 width=width,
                 target_projection=target_projection,
+                method=method,
             ),
         )
 
-    @property
+    @functools.cached_property
     def sampler(self) -> ReSampler:
         return self.attrs["resampler"]
 
@@ -425,11 +431,10 @@ class ArrayProducer(DataWorker[TimeSlicePoint, Array[[N, N, N, N, N], np.float_]
 
 
 # =====================================================================================================================
+#  - functions
+# =====================================================================================================================
 def open_datasets(
-    paths: Iterable[tuple[str, Depends]],
-    *,
-    levels: ListLike[Number] | None = None,
-    # x: Mapping[Dimensions, Sequence[Any]],
+    paths: Iterable[tuple[str, Depends]], *, levels: ListLike[Number] | None = None
 ) -> Iterable[DependentDataset]:
     for path, depends in paths:
         ds = DependentDataset.from_zarr(path, depends)
@@ -506,7 +511,7 @@ def data_generator(
         dsets = list(dsets)  # don't want to exhaust the iterator
         indices = indices(dsets, **sampler_kwargs)
 
-    producer = ArrayProducer(
+    producer = ArrayProducer.from_scale(
         indices, *dsets, scale=scale, height=height, width=width, target_projection=target_projection, method=method
     )
     return DataGenerator(producer, maxsize=maxsize, timeout=timeout)
@@ -514,7 +519,8 @@ def data_generator(
 
 def pipeline(
     paths: Iterable[tuple[str, Depends]],
-    indices: Iterable[TimeSlicePoint] | Callable[..., Iterable[TimeSlicePoint]] = LinearSampler,
+    indices: Iterable[TimeSlicePoint]
+    | Callable[[Iterable[DependentDataset]], Iterable[TimeSlicePoint]] = LinearSampler,
     *,
     dx: float = 200,
     dy: float | None = None,
@@ -533,7 +539,7 @@ def pipeline(
     maxsize: int = 0,
     timeout: float | None = None,
     **sampler_kwargs: Any,
-):
+) -> DataGenerator[Array[[N, N, N, N, N], np.float_]]:
     datasets = open_datasets(paths, levels=pressure)
     return data_generator(
         datasets,
