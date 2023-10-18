@@ -1,40 +1,31 @@
 from __future__ import annotations
 
-import abc
-import functools
 from typing import NewType
 
 import numpy as np
 import pandas as pd
 import pyproj
-import pyresample.geometry
 import xarray as xr
-from pyresample.geometry import AreaDefinition, GridDefinition
+from pyresample.geometry import GridDefinition
 from xarray.core.coordinates import DatasetCoordinates
 
 from ._typing import (
     N2,
     N4,
     Any,
-    AreaExtent,
     Array,
     Callable,
     Hashable,
     Iterable,
-    Iterator,
-    Latitude,
     ListLike,
     Literal,
-    Longitude,
     Mapping,
     N,
     NDArray,
     Number,
-    PointOverTime,
     Self,
     Sequence,
-    Slice,
-    TimeSlice,
+    TimeSlicePoint,
     TypeAlias,
     Union,
 )
@@ -44,7 +35,6 @@ from .enums import (
     LON,
     LVL,
     TIME,
-    CoordinateReferenceSystem,
     Coordinates,
     DependentVariables,
     Dimensions,
@@ -54,8 +44,10 @@ from .enums import (
     Y,
     Z,
 )
-from .generic import Data, DataWorker
-from .utils import area_definition, log_scale, slice_time, sort_unique
+from .generic import Data, DataGenerator, DataWorker
+from .sampling.resampler import AbstractInstructor, ReSampleInstructor, ReSampler
+from .sampling.sampler import LinearSampler
+from .utils import log_scale, sort_unique
 
 Nv = NewType("Nv", int)
 Nx = NewType("Nx", int)
@@ -64,7 +56,7 @@ Nt = NewType("Nt", int)
 Nz = NewType("Nz", int)
 
 Depends: TypeAlias = Union[type[DependentVariables], DependentVariables, Sequence[DependentVariables], "Dependencies"]
-ResampleInstruction: TypeAlias = tuple["DependentDataset", AreaExtent]
+# ResampleInstruction: TypeAlias = tuple["DependentDataset", AreaExtent]
 Unit = Literal["km", "m"]
 # =====================================================================================================================
 STANDARD_SURFACE_PRESSURE = P0 = 1013.25  # - hPa
@@ -372,7 +364,7 @@ class Mesoscale(Data[NDArray[np.float_]]):
         method: str = "nearest",
     ) -> ReSampler:
         return ReSampler(
-            _Instruction(self, *dsets),
+            ReSampleInstructor(self, *dsets),
             height=height,
             width=width,
             target_projection=target_projection,
@@ -381,188 +373,19 @@ class Mesoscale(Data[NDArray[np.float_]]):
 
 
 # =====================================================================================================================
-#
-# =====================================================================================================================
-class AbstractInstruction(abc.ABC):
-    @property
-    @abc.abstractmethod
-    def instruction(self) -> _Instruction:
-        ...
-
-    @property
-    def dvars(self) -> Array[[N, N], np.str_]:
-        return self.instruction._dvars
-
-    @property
-    def levels(self) -> Array[[N], np.float_]:
-        return self.instruction._levels
-
-    @property
-    def time(self) -> Array[[N], np.datetime64]:
-        return self.instruction._time
-
-    def slice_time(self, s: TimeSlice, /) -> Array[[N], np.datetime64]:
-        return slice_time(self.time, s)
-
-
-class _Instruction(Iterable[ResampleInstruction], AbstractInstruction):
-    def __init__(self, scale: Mesoscale, *dsets: DependentDataset) -> None:
-        super().__init__()
-
-        time, levels, dvars = zip(*((ds.time.to_numpy(), ds.level.to_numpy(), list(ds.data_vars)) for ds in dsets))
-        # - time
-        self._time = time = np.sort(np.unique(time))
-
-        # - levels
-        levels = np.concatenate(levels)
-        self._levels = levels = np.sort(levels[np.isin(levels, scale.hpa)])[::-1]  # descending
-
-        # - dvars
-        self._dvars = np.stack(dvars)
-
-        datasets = (ds.sel({LVL: [lvl], TIME: time}) for lvl in levels for ds in dsets if lvl in ds.level)
-        extents = scale.stack_extent() * 1000.0  # km -> m
-        self._it = tuple(zip(datasets, extents))
-
-    def __iter__(self) -> Iterator[ResampleInstruction]:
-        return iter(self._it)
-
-    @property
-    def instruction(self) -> _Instruction:
-        return self
-
-
-def _get_partial_method(
-    method,
-    sigmas=[1.0],
-    radius_of_influence=500000,
-    fill_value=0,
-    reduce_data=True,
-    nprocs=1,
-    segments=None,
-    with_uncert: bool = False,
-) -> Callable[[GridDefinition, Array[[Ny, Nx, N], np.float_], AreaDefinition], Array[[Ny, Nx, N], np.float_]]:
-    if method == "nearest":
-        func = pyresample.kd_tree.resample_nearest
-        kwargs = dict(
-            radius_of_influence=radius_of_influence,
-            fill_value=fill_value,
-            reduce_data=reduce_data,
-            nprocs=nprocs,
-            segments=segments,
-        )
-    elif method == "gauss":
-        func = pyresample.kd_tree.resample_gauss
-        kwargs = dict(
-            sigmas=sigmas,
-            radius_of_influence=radius_of_influence,
-            fill_value=fill_value,
-            reduce_data=reduce_data,
-            nprocs=nprocs,
-            segments=segments,
-            with_uncert=with_uncert,
-        )
-    else:
-        raise ValueError(f"method {method} is not supported!")
-    return functools.partial(func, **kwargs)
-
-
-class ReSampler(AbstractInstruction):
+class ArrayProducer(DataWorker[TimeSlicePoint, Array[[N, N, N, N, N], np.float_]], AbstractInstructor):
     def __init__(
         self,
-        instruction: _Instruction,
-        /,
-        *,
-        height: int = 80,
-        width: int = 80,
-        target_projection: LiteralCRS = "lambert_azimuthal_equal_area",
-        method: str = "nearest",
-        sigmas=[1.0],
-        radius_of_influence=500000,
-        fill_value=0,
-        reduce_data=True,
-        nprocs=1,
-        segments=None,
-        with_uncert: bool = False,
-    ) -> None:
-        self._instruction = instruction
-        self.height = height
-        self.width = width
-        self.target_projection = (
-            CoordinateReferenceSystem[target_projection] if isinstance(target_projection, str) else target_projection
-        )
-
-        self._resample_method = _get_partial_method(
-            method,
-            radius_of_influence=radius_of_influence,
-            fill_value=fill_value,
-            reduce_data=reduce_data,
-            nprocs=nprocs,
-            segments=segments,
-            with_uncert=with_uncert,
-            sigmas=sigmas,
-        )
-
-    @property
-    def instruction(self) -> _Instruction:
-        return self._instruction
-
-    def _partial_area_definition(self, longitude: Longitude, latitude: Latitude) -> functools.partial[AreaDefinition]:
-        return functools.partial(
-            area_definition,
-            width=self.width,
-            height=self.height,
-            projection=self.target_projection.from_point(longitude, latitude),
-        )
-
-    def _resample_point_over_time(
-        self, longitude: Longitude, latitude: Latitude, time: Slice[np.datetime64]
-    ) -> list[Array[[Ny, Nx, N], np.float_]]:
-        """resample the data along the vertical scale for a single point over time.
-        each item in the list is a 3-d array that can be stacked into along the vertical axis.
-
-        The variables and Time are stacked into `N`.
-        """
-        area_definition = self._partial_area_definition(longitude, latitude)
-
-        return [
-            self._resample_method(
-                ds.grid_definition,
-                # TODO: it would probably be beneficial to slice the data before resampling
-                # to prevent loading all of th lat_lon data into memory
-                ds.sel({TIME: time}).to_stacked_array("C", [Y, X]).to_numpy(),
-                area_definition(area_extent=area_extent),
-            )
-            for ds, area_extent in self._instruction
-        ]
-
-    def __call__(
-        self, longitude: Longitude, latitude: Latitude, time: TimeSlice
-    ) -> Array[[Nv, Nt, Nz, Ny, Nx], np.float_]:
-        """stack the data along `Nz` and reshape and unsqueeze the data to match the expected output."""
-        arr = np.stack(self._resample_point_over_time(longitude, latitude, time))  # (z, y, x, v*t)
-
-        # - reshape the data
-        t = len(self.slice_time(time))
-        z, y, x = arr.shape[:3]
-        arr = arr.reshape((z, y, x, t, -1))  # unsqueeze C
-        return np.moveaxis(arr, (-1, -2), (0, 1))
-
-
-# =====================================================================================================================
-class ArrayWorker(DataWorker[PointOverTime, Array[[N, N, N, N, N], np.float_]], AbstractInstruction):
-    def __init__(
-        self,
-        indices: Iterable[PointOverTime],
+        indices: Iterable[TimeSlicePoint],
         *dsets: DependentDataset,
         scale: Mesoscale,
         height: int = 80,
         width: int = 80,
         target_projection: LiteralCRS = "lambert_azimuthal_equal_area",
+        method: str = "nearest",
     ) -> None:
         super().__init__(
             indices,
-            hpa=scale.hpa,
             resampler=scale.resample(
                 *dsets,
                 height=height,
@@ -576,16 +399,16 @@ class ArrayWorker(DataWorker[PointOverTime, Array[[N, N, N, N, N], np.float_]], 
         return self.attrs["resampler"]
 
     @property
-    def instruction(self) -> _Instruction:
-        return self.sampler._instruction
+    def instructor(self) -> ReSampleInstructor:
+        return self.sampler._instructor
 
-    def __getitem__(self, idx: PointOverTime) -> Array[[Nv, Nt, Nz, Ny, Nx], np.float_]:
-        (lon, lat), time = idx
+    def __getitem__(self, idx: TimeSlicePoint) -> Array[[Nv, Nt, Nz, Ny, Nx], np.float_]:
+        time, (lon, lat) = idx
         return self.sampler(lon, lat, time)
 
-    def get_array(self, idx: PointOverTime, /) -> xr.DataArray:
+    def get_array(self, idx: TimeSlicePoint, /) -> xr.DataArray:
         data = self[idx]
-        _, time = idx
+        time, _ = idx
 
         return xr.DataArray(
             data,
@@ -597,5 +420,138 @@ class ArrayWorker(DataWorker[PointOverTime, Array[[N, N, N, N, N], np.float_]], 
             },
         )
 
-    def get_dataset(self, idx: PointOverTime, /) -> xr.Dataset:
+    def get_dataset(self, idx: TimeSlicePoint, /) -> xr.Dataset:
         return self.get_array(idx).to_dataset(_VARIABLES)
+
+
+# =====================================================================================================================
+def open_datasets(
+    paths: Iterable[tuple[str, Depends]],
+    *,
+    levels: ListLike[Number] | None = None,
+    # x: Mapping[Dimensions, Sequence[Any]],
+) -> Iterable[DependentDataset]:
+    for path, depends in paths:
+        ds = DependentDataset.from_zarr(path, depends)
+        if levels is not None:
+            ds = ds.sel({LVL: ds.level.isin(levels)})
+        yield ds
+
+
+def create_resampler(
+    dsets: Iterable[DependentDataset],
+    dx: float = 200,
+    dy: float | None = None,
+    start: int = 1000,
+    stop: int = 25 - 1,
+    step: int = -25,
+    p0: float = P0,
+    p1: float = P1,
+    rate: float = 1,
+    pressure: ListLike[Number] = DEFAULT_PRESSURE,
+    height: int = 80,
+    width: int = 80,
+    target_projection: LiteralCRS = "lambert_azimuthal_equal_area",
+    method: str = "nearest",
+) -> ReSampler:
+    scale = Mesoscale.arange(
+        dx=dx,
+        dy=dy,
+        start=start,
+        stop=stop,
+        step=step,
+        p0=p0,
+        p1=p1,
+        rate=rate,
+        pressure=pressure,
+    )
+    return scale.resample(*dsets, height=height, width=width, target_projection=target_projection, method=method)
+
+
+def data_generator(
+    dsets: Iterable[DependentDataset],
+    indices: Iterable[TimeSlicePoint]
+    | Callable[[Iterable[DependentDataset]], Iterable[TimeSlicePoint]] = LinearSampler,
+    *,
+    dx: float = 200,
+    dy: float | None = None,
+    start: int = 1000,
+    stop: int = 25 - 1,
+    step: int = -25,
+    p0: float = P0,
+    p1: float = P1,
+    rate: float = 1,
+    pressure: ListLike[Number] = DEFAULT_PRESSURE,
+    height: int = 80,
+    width: int = 80,
+    target_projection: LiteralCRS = "lambert_azimuthal_equal_area",
+    method: str = "nearest",
+    # - data consumer -
+    maxsize: int = 0,
+    timeout: float | None = None,
+    **sampler_kwargs: Any,
+) -> DataGenerator[Array[[N, N, N, N, N], np.float_]]:
+    scale = Mesoscale.arange(
+        dx=dx,
+        dy=dy,
+        start=start,
+        stop=stop,
+        step=step,
+        p0=p0,
+        p1=p1,
+        rate=rate,
+        pressure=pressure,
+    )
+    if callable(indices):
+        dsets = list(dsets)  # don't want to exhaust the iterator
+        indices = indices(dsets, **sampler_kwargs)
+
+    producer = ArrayProducer(
+        indices, *dsets, scale=scale, height=height, width=width, target_projection=target_projection, method=method
+    )
+    return DataGenerator(producer, maxsize=maxsize, timeout=timeout)
+
+
+def pipeline(
+    paths: Iterable[tuple[str, Depends]],
+    indices: Iterable[TimeSlicePoint] | Callable[..., Iterable[TimeSlicePoint]] = LinearSampler,
+    *,
+    dx: float = 200,
+    dy: float | None = None,
+    start: int = 1000,
+    stop: int = 25 - 1,
+    step: int = -25,
+    p0: float = P0,
+    p1: float = P1,
+    rate: float = 1,
+    pressure: ListLike[Number] = DEFAULT_PRESSURE,
+    height: int = 80,
+    width: int = 80,
+    target_projection: LiteralCRS = "lambert_azimuthal_equal_area",
+    method: str = "nearest",
+    # - data consumer -
+    maxsize: int = 0,
+    timeout: float | None = None,
+    **sampler_kwargs: Any,
+):
+    datasets = open_datasets(paths, levels=pressure)
+    return data_generator(
+        datasets,
+        indices,
+        dx=dx,
+        dy=dy,
+        start=start,
+        stop=stop,
+        step=step,
+        p0=p0,
+        p1=p1,
+        rate=rate,
+        pressure=pressure,
+        height=height,
+        width=width,
+        target_projection=target_projection,
+        method=method,
+        maxsize=maxsize,
+        timeout=timeout,
+        **sampler_kwargs,
+    )

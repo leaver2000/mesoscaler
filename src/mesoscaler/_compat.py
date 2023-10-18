@@ -1,6 +1,6 @@
 # noqa
 # mypy: ignore-errors
-# pyright: reportGeneralTypeIssues=false
+# pyright: reportGeneralTypeIssues=false, reportMissingImports=false
 """torch==2.1.0 compatibility layer."""
 from __future__ import annotations
 
@@ -13,10 +13,20 @@ __all__ = [
     "Sampler",
     "SequentialSampler",
 ]
+import typing
+
 try:
+    import torch  # noqa
+
+    _has_torch = True
+except ImportError:
+    _has_torch = False
+
+if _has_torch:
     from torch.utils.data import ChainDataset, ConcatDataset, Dataset, IterableDataset
     from torch.utils.data.sampler import BatchSampler, Sampler, SequentialSampler
-except ImportError:
+
+elif not _has_torch and not typing.TYPE_CHECKING:
     import bisect
     import warnings
     from typing import (

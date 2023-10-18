@@ -25,11 +25,9 @@ import urllib.parse
 from collections.abc import Sequence
 
 import numpy as np
-import pandas as pd
 import pyproj
 import pyresample.geometry
 import toml
-from pandas.api.types import is_datetime64_any_dtype as is_datetime
 
 try:
     get_ipython  # type: ignore
@@ -39,6 +37,8 @@ except (NameError, ImportError):
         import tqdm  # type: ignore
     except ImportError:
         tqdm = None  # type: ignore
+
+import datetime
 
 from ._typing import (
     Any,
@@ -67,14 +67,10 @@ from ._typing import (
     TypeVar,
     overload,
 )
+from .enums import LiteralNoDefault, NoDefault, TimeFrequency, TimeFrequencyLike
 
 _T1 = TypeVar("_T1", bound=Any)
 _T2 = TypeVar("_T2")
-
-__NoDefault = enum.Enum("", "NoDefault")
-NoDefault = __NoDefault.NoDefault
-LiteralNoDefault = Literal[__NoDefault.NoDefault]
-del __NoDefault
 
 
 # =====================================================================================================================
@@ -152,14 +148,29 @@ def area_definition(
 
 
 # =====================================================================================================================
-# - array/tensor utils
+# - time utils
 # =====================================================================================================================
+
+
+def date_range(
+    start: datetime.datetime | np.datetime64 | str,
+    end: datetime.datetime | np.datetime64 | str,
+    step: int | datetime.timedelta | np.timedelta64 | None = None,
+    *,
+    freq: TimeFrequencyLike = TimeFrequency("hour"),
+) -> Array[[N], np.datetime64]:
+    return TimeFrequency(freq).arange(start, end, step)
+
+
 def slice_time(t: Array[[...], np.datetime64], s: TimeSlice, /) -> Array[[N], np.datetime64]:
     if s.start is None or s.stop is None or s.step is not None:
         raise ValueError(f"invalid slice: {s}")
     return t[(s.start <= t) | (t <= s.stop)]
 
 
+# =====================================================================================================================
+# - array/tensor utils
+# =====================================================================================================================
 def normalize(x: NDArray[np.number[Any]]) -> NDArray[np.float_]:
     """
     Normalize the input tensor along the specified dimensions.

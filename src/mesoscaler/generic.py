@@ -6,8 +6,7 @@ __all__ = [
     "Data",
     "DataMapping",
     "DataWorker",
-    "DataConsumer",
-    "Loc",
+    "DataGenerator",
     # - torch.utils.data
     "Dataset",
     "IterableDataset",
@@ -34,8 +33,6 @@ from ._compat import (  # noqa
 )
 from ._typing import (
     Any,
-    AnyArrayLike,
-    Callable,
     Final,
     Generic,
     Hashable,
@@ -43,15 +40,12 @@ from ._typing import (
     Iterable,
     Iterator,
     Mapping,
-    NumpyDType_T,
-    PandasDType_T,
     Self,
     Sized,
     TypeVar,
     get_first_order_generic,
-    overload,
 )
-from .utils import is_array_like, join_kv, repr_
+from .utils import join_kv, repr_
 
 _T = TypeVar("_T")
 
@@ -192,10 +186,16 @@ class DataWorker(NamedAndSized, Mapping[HashableT, _T], abc.ABC):
 
 
 # =====================================================================================================================
-# - DataConsumer
+# - DataGenerator
 # =====================================================================================================================
-class DataConsumer(NamedAndSized, IterableDataset[_T], Generic[HashableT, _T]):
-    def __init__(self, worker: Mapping[HashableT, _T], *, maxsize: int = 0, timeout: float | None = None) -> None:
+class DataGenerator(NamedAndSized, IterableDataset[_T]):
+    def __init__(
+        self,
+        worker: Mapping[HashableT, _T] | Mapping[HashableT, _T],
+        *,
+        maxsize: int = 0,
+        timeout: float | None = None,
+    ) -> None:
         super().__init__()
         self.thread: Final[threading.Thread] = threading.Thread(target=self._target, name=self.name, daemon=True)
         self.queue: Final[queue.Queue[_T]] = queue.Queue(maxsize=maxsize)
@@ -219,32 +219,3 @@ class DataConsumer(NamedAndSized, IterableDataset[_T], Generic[HashableT, _T]):
     def start(self):
         self.thread.start()
         return self
-
-
-# =====================================================================================================================
-#
-# =====================================================================================================================
-_AnyArrayLikeT = TypeVar("_AnyArrayLikeT", bound=AnyArrayLike)
-
-
-# TODO: this need work
-class Loc(Generic[_AnyArrayLikeT]):
-    def __init__(
-        self,
-        hook: Callable[[AnyArrayLike[NumpyDType_T, PandasDType_T]], _AnyArrayLikeT],
-        data: AnyArrayLike[NumpyDType_T, PandasDType_T],
-    ) -> None:
-        self._hook = hook
-        self._data = data
-
-    @overload
-    def __getitem__(self, item: list) -> PandasDType_T | NumpyDType_T:  # pyright: ignore
-        ...
-
-    @overload
-    def __getitem__(self, item: Any) -> _AnyArrayLikeT:
-        ...
-
-    def __getitem__(self, item: Any) -> _AnyArrayLikeT | PandasDType_T | NumpyDType_T:  # type: ignore
-        x = self._data[item]
-        return self._hook(x) if is_array_like(x) else x
