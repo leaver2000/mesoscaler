@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from typing import NewType
 import functools
 
 import numpy as np
@@ -16,6 +15,7 @@ from ._typing import (
     Any,
     Array,
     Callable,
+    Final,
     Hashable,
     Iterable,
     ListLike,
@@ -46,27 +46,34 @@ from .enums import (
     Z,
 )
 from .generic import Data, DataGenerator, DataWorker
-from .sampling.resampler import AbstractInstructor, ReSampleInstructor, ReSampler
+from .sampling.intersection import AbstractIntersection, DatasetIntersection
+from .sampling.resampler import Nt, Nv, Nx, Ny, Nz, ReSampler
 from .sampling.sampler import LinearSampler
 from .utils import log_scale, sort_unique
 
-Nv = NewType("Nv", int)
-Nx = NewType("Nx", int)
-Ny = NewType("Ny", int)
-Nt = NewType("Nt", int)
-Nz = NewType("Nz", int)
-
 Depends: TypeAlias = Union[type[DependentVariables], DependentVariables, Sequence[DependentVariables], "Dependencies"]
-# ResampleInstruction: TypeAlias = tuple["DependentDataset", AreaExtent]
+
 Unit = Literal["km", "m"]
 # =====================================================================================================================
-STANDARD_SURFACE_PRESSURE = P0 = 1013.25  # - hPa
-P1 = 25.0  # - hPa
-DEFAULT_PRESSURE: ListLike[Number] = [P0, 925.0, 850.0, 700.0, 500.0, 300.0]  # - hPa
+# - hPa scaling -
+DEFAULT_PRESSURE_BASE = STANDARD_SURFACE_PRESSURE = P0 = 1013.25  # - hPa
+DEFAULT_PRESSURE_TOP = P1 = 25.0  # - hPa
+
+DEFAULT_LEVELS: ListLike[Number] = [P0, 925.0, 850.0, 700.0, 500.0, 300.0]  # - hPa
+
+DEFAULT_LEVEL_START = 1000  # - hPa
+DEFAULT_LEVEL_STOP = 25 - 1
+DEFAULT_LEVEL_STEP = -25
+# -
+DEFAULT_HEIGHT = DEFAULT_WIDTH = 80  # - px
+DEFAULT_DX = DEFAULT_DY = 200.0  # - km
+DEFAULT_SCALE_RATE = 15.0
+DEFAULT_TARGET_PROJECTION: Final[LiteralCRS] = "lambert_azimuthal_equal_area"
+DEFAULT_RESAMPLE_METHOD: Final[Literal["nearest"]] = "nearest"
+
 DERIVED_SURFACE_COORDINATE = {LVL: (LVL.axis, [STANDARD_SURFACE_PRESSURE])}
 """If the Dataset does not contain a vertical coordinate, it is assumed to be a derived atmospheric parameter
 or near surface parameter. The vertical coordinate is then set to the standard surface pressure of 1013.25 hPa."""
-MESOSCALE_BETA = 200.0  # - km
 
 _units: Mapping[Unit, float] = {"km": 1.0, "m": 1000.0}
 _VARIABLES = "variables"
@@ -119,9 +126,9 @@ class Dependencies:
     def metadata(self) -> Mapping[str, Any]:
         return self.enum.metadata  # type: ignore
 
-    @property
-    def name(self) -> str:
-        return self.enum.name
+    # @property
+    # def name(self) -> str:
+    #     return self.enum.name
 
 
 def is_dimension_independent(dims: Iterable[Hashable]) -> bool:
@@ -272,11 +279,11 @@ class DependentDataset(IndependentDataset):
 class Mesoscale(Data[NDArray[np.float_]]):
     def __init__(
         self,
-        dx: float = 200.0,
+        dx: float = DEFAULT_DX,
         dy: float | None = None,
         *,
-        rate: float = 1.0,
-        pressure: ListLike[Number] = DEFAULT_PRESSURE,
+        rate: float = DEFAULT_SCALE_RATE,
+        levels: ListLike[Number] = DEFAULT_LEVELS,
         troposphere: ListLike[Number] | None = None,
     ) -> None:
         super().__init__()
@@ -284,77 +291,82 @@ class Mesoscale(Data[NDArray[np.float_]]):
         tropo = np.asarray(
             sort_unique(self._arange() if troposphere is None else troposphere, descending=True), dtype=np.float_
         )
-        self._hpa = hpa = np.asarray(sort_unique(pressure, descending=True), dtype=np.float_)
-        if not all(np.isin(hpa, tropo)):
-            raise ValueError(f"pressure {hpa} must be a subset of troposphere {tropo}")
+        self._levels = lvls = np.asarray(sort_unique(levels, descending=True), dtype=np.float_)
+        if not all(np.isin(lvls, tropo)):
+            raise ValueError(f"pressure {lvls} must be a subset of troposphere {tropo}")
 
         # - ascending scale
-        mask = np.isin(tropo, hpa)
+        mask = np.isin(tropo, lvls)
         self._scale = scale = log_scale(tropo, rate=rate)[::-1][mask]
         self._dx, self._dy = scale[np.newaxis] * np.array([[dx], [dy or dx]])
 
     @staticmethod
     def _arange(
-        start: int = 1000,
-        stop: int = 25 - 1,
-        step: int = -25,
+        start: int = DEFAULT_LEVEL_START,
+        stop: int = DEFAULT_LEVEL_STOP,
+        step: int = DEFAULT_LEVEL_STEP,
         *,
-        p0: float = P0,
-        p1=P1,
+        p0: float = DEFAULT_PRESSURE_BASE,
+        p1: float = DEFAULT_PRESSURE_TOP,
     ) -> Sequence[float]:
         return [p0, *range(start, stop, step), p1]
 
     @classmethod
     def arange(
         cls,
-        dx: float = 200.0,
+        dx: float = DEFAULT_DX,
         dy: float | None = None,
-        start: int = 1000,
-        stop: int = 25 - 1,
-        step: int = -25,
+        start: int = DEFAULT_LEVEL_START,
+        stop: int = DEFAULT_LEVEL_STOP,
+        step: int = DEFAULT_LEVEL_STEP,
         *,
-        p0: float = P0,
-        p1=P1,
-        rate: float = 1.0,
-        pressure: ListLike[Number],
+        p0: float = DEFAULT_PRESSURE_BASE,
+        p1: float = DEFAULT_PRESSURE_TOP,
+        rate: float = DEFAULT_SCALE_RATE,
+        levels: ListLike[Number] = DEFAULT_LEVELS,
     ) -> Mesoscale:
-        return cls(dx, dy, rate=rate, pressure=pressure, troposphere=cls._arange(start, stop, step, p0=p0, p1=p1))
+        return cls(dx, dy, rate=rate, levels=levels, troposphere=cls._arange(start, stop, step, p0=p0, p1=p1))
 
     @property
-    def hpa(self) -> NDArray[np.float_]:
-        return self._hpa
+    def levels(self) -> Array[[N], np.float_]:
+        return self._levels
 
     @property
-    def scale(self) -> NDArray[np.float_]:
+    def scale(self) -> Array[[N], np.float_]:
         return self._scale
 
     @property
-    def dx(self) -> NDArray[np.float_]:
+    def dx(self) -> Array[[N], np.float_]:
         return self._dx
 
     @property
-    def dy(self) -> NDArray[np.float_]:
+    def dy(self) -> Array[[N], np.float_]:
         return self._dy
 
     @property
+    def area_extent(self) -> Array[[N, N4], np.float_]:
+        xy = np.c_[self.dx, self.dy]
+        return np.c_[-xy, xy]
+
+    @property
     def data(self) -> Iterable[tuple[str, NDArray[np.float_]]]:
-        yield from (("scale", self.scale), ("hpa", self.hpa), ("dx", self.dx), ("dy", self.dy))
+        yield from (("scale", self.scale), ("levels", self.levels), ("dx", self.dx), ("dy", self.dy))
 
     def __array__(self) -> Array[[N, N2], np.float_]:
         return self.to_numpy()
 
     def __len__(self) -> int:
-        return len(self.hpa)
+        return len(self.levels)
 
     def to_pandas(self) -> pd.DataFrame:
-        return pd.DataFrame(self.to_dict()).set_index("hpa").sort_index()
+        return pd.DataFrame(self.to_dict()).set_index("levels").sort_index()
 
     def to_numpy(self, *, units: Unit = "km") -> Array[[N, N2], np.float_]:
-        return np.c_[self.dx, self.dy] * _units[units]
-
-    def stack_extent(self, *, units: Unit = "km") -> Array[[N, N4], np.float_]:
-        xy = self.to_numpy(units=units)
+        xy = np.c_[self.dx, self.dy] * _units[units]
         return np.c_[-xy, xy]
+
+    def intersection(self, *dsets: DependentDataset) -> DatasetIntersection:
+        return DatasetIntersection.from_datasets(dsets, self)
 
     def resample(
         self,
@@ -365,48 +377,24 @@ class Mesoscale(Data[NDArray[np.float_]]):
         method: str = "nearest",
     ) -> ReSampler:
         return ReSampler(
-            ReSampleInstructor(self, *dsets),
-            height=height,
-            width=width,
-            target_projection=target_projection,
-            method=method,
+            self.intersection(*dsets), height=height, width=width, target_projection=target_projection, method=method
         )
 
 
 # =====================================================================================================================
-class ArrayProducer(DataWorker[TimeSlicePoint, Array[[N, N, N, N, N], np.float_]], AbstractInstructor):
+#
+# =====================================================================================================================
+class DataProducer(DataWorker[TimeSlicePoint, Array[[N, N, N, N, N], np.float_]], AbstractIntersection):
     def __init__(self, indices: Iterable[TimeSlicePoint], resampler: ReSampler) -> None:
         super().__init__(indices, resampler=resampler)
-
-    @classmethod
-    def from_scale(
-        cls,
-        indices: Iterable[TimeSlicePoint],
-        *dsets: DependentDataset,
-        scale: Mesoscale,
-        height: int = 80,
-        width: int = 80,
-        target_projection: LiteralCRS = "lambert_azimuthal_equal_area",
-        method: str = "nearest",
-    ):
-        return cls(
-            indices,
-            resampler=scale.resample(
-                *dsets,
-                height=height,
-                width=width,
-                target_projection=target_projection,
-                method=method,
-            ),
-        )
 
     @functools.cached_property
     def sampler(self) -> ReSampler:
         return self.attrs["resampler"]
 
     @property
-    def instructor(self) -> ReSampleInstructor:
-        return self.sampler._instructor
+    def intersection(self) -> DatasetIntersection:
+        return self.sampler.intersection
 
     def __getitem__(self, idx: TimeSlicePoint) -> Array[[Nv, Nt, Nz, Ny, Nx], np.float_]:
         time, (lon, lat) = idx
@@ -445,20 +433,53 @@ def open_datasets(
 
 def create_resampler(
     dsets: Iterable[DependentDataset],
-    dx: float = 200,
+    dx: float = DEFAULT_DX,
     dy: float | None = None,
-    start: int = 1000,
-    stop: int = 25 - 1,
-    step: int = -25,
-    p0: float = P0,
-    p1: float = P1,
-    rate: float = 1,
-    pressure: ListLike[Number] = DEFAULT_PRESSURE,
-    height: int = 80,
-    width: int = 80,
-    target_projection: LiteralCRS = "lambert_azimuthal_equal_area",
-    method: str = "nearest",
+    start: int = DEFAULT_LEVEL_START,
+    stop: int = DEFAULT_LEVEL_STOP,
+    step: int = DEFAULT_LEVEL_STEP,
+    *,
+    p0: float = DEFAULT_PRESSURE_BASE,
+    p1: float = DEFAULT_PRESSURE_TOP,
+    rate: float = DEFAULT_SCALE_RATE,
+    levels: ListLike[Number] = DEFAULT_LEVELS,
+    height: int = DEFAULT_HEIGHT,
+    width: int = DEFAULT_WIDTH,
+    target_projection: LiteralCRS = DEFAULT_TARGET_PROJECTION,
+    method: str = DEFAULT_RESAMPLE_METHOD,
 ) -> ReSampler:
+    return Mesoscale.arange(
+        dx=dx,
+        dy=dy,
+        start=start,
+        stop=stop,
+        step=step,
+        p0=p0,
+        p1=p1,
+        rate=rate,
+        levels=levels,
+    ).resample(*dsets, height=height, width=width, target_projection=target_projection, method=method)
+
+
+def data_producer(
+    dsets: Iterable[DependentDataset],
+    indices: Iterable[TimeSlicePoint] | Callable[[DatasetIntersection], Iterable[TimeSlicePoint]] = LinearSampler,
+    *,
+    dx: float = DEFAULT_DX,
+    dy: float | None = None,
+    start: int = DEFAULT_LEVEL_START,
+    stop: int = DEFAULT_LEVEL_STOP,
+    step: int = DEFAULT_LEVEL_STEP,
+    p0: float = DEFAULT_PRESSURE_BASE,
+    p1: float = DEFAULT_PRESSURE_TOP,
+    rate: float = DEFAULT_SCALE_RATE,
+    levels: ListLike[Number] = DEFAULT_LEVELS,
+    height: int = DEFAULT_HEIGHT,
+    width: int = DEFAULT_WIDTH,
+    target_projection: LiteralCRS = DEFAULT_TARGET_PROJECTION,
+    method: str = DEFAULT_RESAMPLE_METHOD,
+    **sampler_kwargs: Any,
+) -> DataProducer:
     scale = Mesoscale.arange(
         dx=dx,
         dy=dy,
@@ -468,59 +489,18 @@ def create_resampler(
         p0=p0,
         p1=p1,
         rate=rate,
-        pressure=pressure,
+        levels=levels,
     )
-    return scale.resample(*dsets, height=height, width=width, target_projection=target_projection, method=method)
+    resampler = scale.resample(*dsets, height=height, width=width, target_projection=target_projection, method=method)
+    if callable(indices):
+        indices = indices(resampler.intersection, **sampler_kwargs)
+
+    return DataProducer(indices, resampler=resampler)
 
 
 def data_generator(
-    dsets: Iterable[DependentDataset],
-    indices: Iterable[TimeSlicePoint]
-    | Callable[[Iterable[DependentDataset]], Iterable[TimeSlicePoint]] = LinearSampler,
-    *,
-    dx: float = 200,
-    dy: float | None = None,
-    start: int = 1000,
-    stop: int = 25 - 1,
-    step: int = -25,
-    p0: float = P0,
-    p1: float = P1,
-    rate: float = 1,
-    pressure: ListLike[Number] = DEFAULT_PRESSURE,
-    height: int = 80,
-    width: int = 80,
-    target_projection: LiteralCRS = "lambert_azimuthal_equal_area",
-    method: str = "nearest",
-    # - data consumer -
-    maxsize: int = 0,
-    timeout: float | None = None,
-    **sampler_kwargs: Any,
-) -> DataGenerator[Array[[N, N, N, N, N], np.float_]]:
-    scale = Mesoscale.arange(
-        dx=dx,
-        dy=dy,
-        start=start,
-        stop=stop,
-        step=step,
-        p0=p0,
-        p1=p1,
-        rate=rate,
-        pressure=pressure,
-    )
-    if callable(indices):
-        dsets = list(dsets)  # don't want to exhaust the iterator
-        indices = indices(dsets, **sampler_kwargs)
-
-    producer = ArrayProducer.from_scale(
-        indices, *dsets, scale=scale, height=height, width=width, target_projection=target_projection, method=method
-    )
-    return DataGenerator(producer, maxsize=maxsize, timeout=timeout)
-
-
-def pipeline(
     paths: Iterable[tuple[str, Depends]],
-    indices: Iterable[TimeSlicePoint]
-    | Callable[[Iterable[DependentDataset]], Iterable[TimeSlicePoint]] = LinearSampler,
+    indices: Iterable[TimeSlicePoint] | Callable[[DatasetIntersection], Iterable[TimeSlicePoint]] = LinearSampler,
     *,
     dx: float = 200,
     dy: float | None = None,
@@ -530,7 +510,7 @@ def pipeline(
     p0: float = P0,
     p1: float = P1,
     rate: float = 1,
-    pressure: ListLike[Number] = DEFAULT_PRESSURE,
+    levels: ListLike[Number] = DEFAULT_LEVELS,
     height: int = 80,
     width: int = 80,
     target_projection: LiteralCRS = "lambert_azimuthal_equal_area",
@@ -540,8 +520,8 @@ def pipeline(
     timeout: float | None = None,
     **sampler_kwargs: Any,
 ) -> DataGenerator[Array[[N, N, N, N, N], np.float_]]:
-    datasets = open_datasets(paths, levels=pressure)
-    return data_generator(
+    datasets = open_datasets(paths, levels=levels)
+    producer = data_producer(
         datasets,
         indices,
         dx=dx,
@@ -552,7 +532,65 @@ def pipeline(
         p0=p0,
         p1=p1,
         rate=rate,
-        pressure=pressure,
+        levels=levels,
+        height=height,
+        width=width,
+        target_projection=target_projection,
+        method=method,
+        **sampler_kwargs,
+    )
+    return DataGenerator(producer, maxsize=maxsize, timeout=timeout)
+
+
+from . import _compat
+
+
+def data_loader(
+    paths: Iterable[tuple[str, Depends]],
+    indices: Iterable[TimeSlicePoint] | Callable[[DatasetIntersection], Iterable[TimeSlicePoint]] = LinearSampler,
+    *,
+    dx: float = 200,
+    dy: float | None = None,
+    start: int = 1000,
+    stop: int = 25 - 1,
+    step: int = -25,
+    p0: float = P0,
+    p1: float = P1,
+    rate: float = 1,
+    levels: ListLike[Number] = DEFAULT_LEVELS,
+    height: int = 80,
+    width: int = 80,
+    target_projection: LiteralCRS = "lambert_azimuthal_equal_area",
+    method: str = "nearest",
+    # - data consumer -
+    maxsize: int = 0,
+    timeout: float | None = None,
+    #
+    batch_size: int | None = 1,
+    shuffle: bool | None = None,
+    # sampler: Sampler[Unknown] | Iterable[Unknown] | None = None,
+    # batch_sampler: Sampler[List[Unknown]] | Iterable[List[Unknown]] | None = None,
+    num_workers: int = 0,
+    # collate_fn: _collate_fn_t[Unknown] | None = None,
+    pin_memory: bool = False,
+    drop_last: bool = False,
+    # timeout: float = 0,
+    **sampler_kwargs: Any,
+):
+    if not _compat._has_torch:
+        raise RuntimeError("torch is not installed!")
+    dataset = data_generator(
+        paths,
+        indices,
+        dx=dx,
+        dy=dy,
+        start=start,
+        stop=stop,
+        step=step,
+        p0=p0,
+        p1=p1,
+        rate=rate,
+        levels=levels,
         height=height,
         width=width,
         target_projection=target_projection,
@@ -560,4 +598,13 @@ def pipeline(
         maxsize=maxsize,
         timeout=timeout,
         **sampler_kwargs,
+    )
+    return _compat.DataLoader(
+        dataset,
+        batch_size=batch_size,
+        timeout=timeout or 0,
+        shuffle=shuffle,
+        num_workers=num_workers,
+        drop_last=drop_last,
+        pin_memory=pin_memory,
     )

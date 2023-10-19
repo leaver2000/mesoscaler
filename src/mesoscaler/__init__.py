@@ -1,11 +1,12 @@
 from .core import (
-    ArrayProducer,
+    DataProducer,
     DependentDataset,
     Mesoscale,
     create_resampler,
     data_generator,
+    data_loader,
+    data_producer,
     open_datasets,
-    pipeline,
 )
 from .enums import ERA5, LAT, LON, LVL, TIME, URMA, X, Y, Z
 from .generic import DataGenerator
@@ -16,7 +17,7 @@ __all__ = [
     # - core -
     "Mesoscale",
     "DependentDataset",
-    "ArrayProducer",
+    "DataProducer",
     # - generic -
     "DataGenerator",
     # - sampling -
@@ -35,8 +36,9 @@ __all__ = [
     "LVL",
     "LAT",
     "LON",
-    "data_generator",
     "open_datasets",
-    "pipeline",
     "create_resampler",
+    "data_producer",
+    "data_generator",
+    "data_loader",
 ]

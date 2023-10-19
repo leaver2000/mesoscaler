@@ -12,6 +12,7 @@ __all__ = [
     "BatchSampler",
     "Sampler",
     "SequentialSampler",
+    "DataLoader",
 ]
 import typing
 
@@ -23,7 +24,13 @@ except ImportError:
     _has_torch = False
 
 if _has_torch:
-    from torch.utils.data import ChainDataset, ConcatDataset, Dataset, IterableDataset
+    from torch.utils.data import (
+        ChainDataset,
+        ConcatDataset,
+        DataLoader,
+        Dataset,
+        IterableDataset,
+    )
     from torch.utils.data.sampler import BatchSampler, Sampler, SequentialSampler
 
 elif not _has_torch and not typing.TYPE_CHECKING:
@@ -41,6 +48,7 @@ elif not _has_torch and not typing.TYPE_CHECKING:
     )
 
     T_co = TypeVar("T_co", covariant=True)
+    DataLoader = None
 
     # =================================================================================================================
     # torch.utils.data.sampler

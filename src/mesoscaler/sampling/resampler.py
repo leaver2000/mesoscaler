@@ -1,82 +1,23 @@
 from __future__ import annotations
 
-import abc
 import functools
 
 import numpy as np
 import pyresample.geometry
 from pyresample.geometry import AreaDefinition, GridDefinition
 
-from .._typing import (
-    TYPE_CHECKING,
-    Any,
-    AreaExtent,
-    Array,
-    Callable,
-    Iterable,
-    Iterator,
-    Latitude,
-    Longitude,
-    N,
-    TimeSlice,
-    TypeAlias,
-)
-from ..enums import LVL, TIME, CoordinateReferenceSystem, LiteralCRS, X, Y
-from ..utils import area_definition, slice_time
+from .._typing import Any, Array, Callable, Latitude, Longitude, N, NewType, TimeSlice
+from ..enums import TIME, CoordinateReferenceSystem, LiteralCRS, X, Y
+from ..utils import area_definition
+from .intersection import AbstractIntersection, DatasetIntersection
 
-if TYPE_CHECKING:
-    from ..core import DependentDataset, Mesoscale, Nt, Nv, Nx, Ny, Nz
+# if TYPE_CHECKING:
 
-ResampleInstruction: TypeAlias = tuple["DependentDataset", AreaExtent]
-
-
-class AbstractInstructor(abc.ABC):
-    @property
-    @abc.abstractmethod
-    def instructor(self) -> ReSampleInstructor:
-        ...
-
-    @property
-    def dvars(self) -> Array[[N, N], np.str_]:
-        return self.instructor._dvars
-
-    @property
-    def levels(self) -> Array[[N], np.float_]:
-        return self.instructor._levels
-
-    @property
-    def time(self) -> Array[[N], np.datetime64]:
-        return self.instructor._time
-
-    def slice_time(self, s: TimeSlice, /) -> Array[[N], np.datetime64]:
-        return slice_time(self.time, s)
-
-
-class ReSampleInstructor(Iterable[ResampleInstruction], AbstractInstructor):
-    def __init__(self, scale: Mesoscale, *dsets: DependentDataset) -> None:
-        super().__init__()
-
-        time, levels, dvars = zip(*((ds.time.to_numpy(), ds.level.to_numpy(), list(ds.data_vars)) for ds in dsets))
-        # - time
-        self._time = time = np.sort(np.unique(time))
-
-        # - levels
-        levels = np.concatenate(levels)
-        self._levels = levels = np.sort(levels[np.isin(levels, scale.hpa)])[::-1]  # descending
-
-        # - dvars
-        self._dvars = np.stack(dvars)
-
-        datasets = (ds.sel({LVL: [lvl], TIME: time}) for lvl in levels for ds in dsets if lvl in ds.level)
-        extents = scale.stack_extent() * 1000.0  # km -> m
-        self._it = tuple(zip(datasets, extents))
-
-    def __iter__(self) -> Iterator[ResampleInstruction]:
-        return iter(self._it)
-
-    @property
-    def instructor(self) -> ReSampleInstructor:
-        return self
+Nv = NewType("Nv", int)
+Nx = NewType("Nx", int)
+Ny = NewType("Ny", int)
+Nt = NewType("Nt", int)
+Nz = NewType("Nz", int)
 
 
 def _get_resample_method(
@@ -110,15 +51,15 @@ def _get_resample_method(
     return functools.partial(func, **kwargs)
 
 
-class ReSampler(AbstractInstructor):
+class ReSampler(AbstractIntersection):
     # There are alot of callbacks and partial methods in this class.
     @property
-    def instructor(self) -> ReSampleInstructor:
-        return self._instructor
+    def intersection(self) -> DatasetIntersection:
+        return self._intersection
 
     def __init__(
         self,
-        instructor: ReSampleInstructor,
+        intersection: DatasetIntersection,
         /,
         *,
         height: int = 80,
@@ -134,7 +75,7 @@ class ReSampler(AbstractInstructor):
         with_uncert: bool = False,
     ) -> None:
         super().__init__()
-        self._instructor = instructor
+        self._intersection = intersection
         self.height = height
         self.width = width
         self.target_projection = (
@@ -178,7 +119,7 @@ class ReSampler(AbstractInstructor):
                 ds.sel({TIME: time}).to_stacked_array("C", [Y, X]).to_numpy(),
                 area_definition(area_extent=area_extent),
             )
-            for ds, area_extent in self._instructor
+            for ds, area_extent in self.intersection.iter_dataset_and_extent()
         ]
 
     def __call__(
@@ -188,7 +129,7 @@ class ReSampler(AbstractInstructor):
         arr = np.stack(self._resample_point_over_time(longitude, latitude, time))  # (z, y, x, v*t)
 
         # - reshape the data
-        t = len(self.slice_time(time))
+        t = len(self.intersection.slice_time(time))
         z, y, x = arr.shape[:3]
         arr = arr.reshape((z, y, x, t, -1))  # unsqueeze C
         return np.moveaxis(arr, (-1, -2), (0, 1))

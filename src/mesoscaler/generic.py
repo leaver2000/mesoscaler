@@ -112,7 +112,8 @@ class Data(NamedAndSized, Generic[_T], abc.ABC):
 # =====================================================================================================================
 class DataSampler(
     NamedAndSized,
-    Sampler[HashableT],
+    Iterable[_T],
+    Sampler[_T],
     abc.ABC,
 ):
     ...
