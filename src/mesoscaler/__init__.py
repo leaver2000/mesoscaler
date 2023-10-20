@@ -1,3 +1,4 @@
+from . import utils
 from .core import (
     DataProducer,
     DependentDataset,
@@ -6,24 +7,52 @@ from .core import (
     data_generator,
     data_loader,
     data_producer,
+    dataset_sequence,
     open_datasets,
+    sequence,
 )
-from .enums import ERA5, LAT, LON, LVL, TIME, URMA, X, Y, Z
+from .enums import (
+    ERA5,
+    LAT,
+    LON,
+    LVL,
+    TIME,
+    URMA,
+    T,
+    X,
+    Y,
+    Z,
+    unpack_coords,
+    unpack_dims,
+)
 from .generic import DataGenerator
+from .sampling.intersection import DatasetSequence, DomainIntersection
 from .sampling.resampler import ReSampler
-from .sampling.sampler import BoundedBoxSampler, LinearSampler
+from .sampling.sampler import AreaOfInterestSampler, LinearSampler
 
 __all__ = [
     # - core -
     "Mesoscale",
     "DependentDataset",
     "DataProducer",
+    # - core.functions
+    "sequence",
+    "open_datasets",
+    "create_resampler",
+    "data_producer",
+    "data_generator",
+    "data_loader",
+    "dataset_sequence",
     # - generic -
     "DataGenerator",
-    # - sampling -
+    # - sampling.sampling -
     "LinearSampler",
-    "BoundedBoxSampler",
+    "AreaOfInterestSampler",
+    # - sampling.resampling -
     "ReSampler",
+    # - sampling.intersection -
+    "DatasetSequence",
+    "DomainIntersection",
     # - enums -
     "URMA",
     "LVL",
@@ -31,14 +60,14 @@ __all__ = [
     "X",
     "Y",
     "Z",
+    "T",
     "ERA5",
     "TIME",
     "LVL",
     "LAT",
     "LON",
-    "open_datasets",
-    "create_resampler",
-    "data_producer",
-    "data_generator",
-    "data_loader",
+    "unpack_coords",
+    "unpack_dims",
+    # - utils -
+    "utils",
 ]

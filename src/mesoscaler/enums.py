@@ -14,8 +14,9 @@ from ._metadata import (
     VariableEnum,
     auto_field,
 )
-from ._typing import Any, Array, Literal, N, overload
+from ._typing import Any, Array, Literal, Mapping, N, TypeAlias, TypeVar, overload
 
+_T = TypeVar("_T")
 __NoDefault = enum.Enum("", "NoDefault")
 NoDefault = __NoDefault.NoDefault
 LiteralNoDefault = Literal[__NoDefault.NoDefault]
@@ -32,12 +33,18 @@ class Dimensions(IndependentVariables):
     X = auto_field(aliases=["x", "longitude", "grid_longitude"])
 
 
-DIMENSIONS = T, Z, Y, X = (
-    Dimensions.T,
-    Dimensions.Z,
-    Dimensions.Y,
-    Dimensions.X,
-)
+def unpack_dims() -> tuple[Literal[Dimensions.T], Literal[Dimensions.Z], Literal[Dimensions.Y], Literal[Dimensions.X]]:
+    """>>> T, Z, Y, X = mesoscaler.unpack_dims()"""
+    return (
+        Dimensions.T,
+        Dimensions.Z,
+        Dimensions.Y,
+        Dimensions.X,
+    )
+
+
+DIMENSIONS = T, Z, Y, X = unpack_dims()
+DimensionsMapType: TypeAlias = Mapping[tuple[Literal[X], Literal[Y]] | Literal[Z] | Literal[T], _T]  # type: ignore[valid-type]
 
 
 class Coordinates(IndependentVariables):
@@ -51,12 +58,24 @@ class Coordinates(IndependentVariables):
         return self.metadata["axis"]
 
 
-COORDINATES = TIME, LVL, LAT, LON = (
-    Coordinates.time,
-    Coordinates.vertical,
-    Coordinates.latitude,
-    Coordinates.longitude,
-)
+def unpack_coords() -> (
+    tuple[
+        Literal[Coordinates.time],
+        Literal[Coordinates.vertical],
+        Literal[Coordinates.latitude],
+        Literal[Coordinates.longitude],
+    ]
+):
+    """>>> TIME, LEVEL, LAT, LON = mesoscaler.unpack_coords()"""
+    return (
+        Coordinates.time,
+        Coordinates.vertical,
+        Coordinates.latitude,
+        Coordinates.longitude,
+    )
+
+
+COORDINATES = TIME, LVL, LAT, LON = unpack_coords()
 
 
 # =====================================================================================================================

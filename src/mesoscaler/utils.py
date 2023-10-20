@@ -48,14 +48,18 @@ from ._typing import (
     Callable,
     GenericAliasType,
     Hashable,
+    ItemsType,
     Iterable,
     Iterator,
     ListLike,
     Literal,
+    Mapping,
     N,
+    NamedTuple,
     NDArray,
     NewType,
     Number_T,
+    NumpyGeneric_T,
     NumpyNumber_T,
     Pair,
     Self,
@@ -116,6 +120,26 @@ def is_array_like(x: Any) -> TypeGuard[AnyArrayLike]:
     return hasattr(x, "ndim") and not is_scalar(x)
 
 
+def is_named_tuple(x: Any) -> TypeGuard[NamedTuple]:
+    return isinstance(x, tuple) and hasattr(x, "_fields")
+
+
+def is_pair(x: Any, strict: bool = False) -> TypeGuard[Pair[Any]]:
+    condition = isinstance(x, tuple) and len(x) == 2
+    if condition and strict:
+        y, z = x
+        condition &= type(y) == type(z)
+    return condition
+
+
+def is_null(value: Any) -> bool:
+    """
+    Check if value is NaN or None
+    """
+    # pylint: disable=comparison-with-itself
+    return value != value or value is None
+
+
 # =====================================================================================================================
 # - projection utils
 # =====================================================================================================================
@@ -150,8 +174,6 @@ def area_definition(
 # =====================================================================================================================
 # - time utils
 # =====================================================================================================================
-
-
 def date_range(
     start: datetime.datetime | np.datetime64 | str,
     end: datetime.datetime | np.datetime64 | str,
@@ -165,12 +187,30 @@ def date_range(
 def slice_time(t: Array[[...], np.datetime64], s: TimeSlice, /) -> Array[[N], np.datetime64]:
     if s.start is None or s.stop is None or s.step is not None:
         raise ValueError(f"invalid slice: {s}")
-    return t[(s.start <= t) | (t <= s.stop)]
+    return t[(s.start <= t) & (t <= s.stop)]
 
 
 # =====================================================================================================================
 # - array/tensor utils
 # =====================================================================================================================
+def batch(x: Array[[N], NumpyGeneric_T], n: int, *, strict: bool = False) -> Array[[N, N], NumpyGeneric_T]:
+    """
+    >>> time = np.arange(datetime.date(2020, 1, 1), datetime.date(2020, 2, 1), datetime.timedelta(hours=1)).astype(
+        "datetime64[h]"
+    )
+    >>> a = batch(time, 6)
+    >>> a.shape
+    >>> (124, 6)
+    """
+    size = x.size
+    if size % n != 0:
+        if strict:
+            raise Exception(f"{size % n}")
+        x = np.pad(x, (0, n - size % n))
+
+    return np.stack(np.split(x, np.arange(n, size, n)))
+
+
 def normalize(x: NDArray[np.number[Any]]) -> NDArray[np.float_]:
     """
     Normalize the input tensor along the specified dimensions.
@@ -260,6 +300,15 @@ def interp_frames(
     return interp(values).astype(arr.dtype)
 
 
+def overlapping(data: list[Array[[N], NumpyGeneric_T]], sort: bool = True) -> Array[[N], NumpyGeneric_T]:
+    x = np.unique(np.concatenate(data))
+    mask = np.stack([np.isin(x, y) for y in data], axis=1).all(axis=1)
+    x = x[mask]
+    if sort:
+        x.sort()
+    return x
+
+
 # =====================================================================================================================
 # - repr utils
 # =====================================================================================================================
@@ -306,7 +355,7 @@ class Representation(str):
     def __new__(cls, x: Any, *, none: Any = None) -> Representation:
         if isinstance(x, Representation):
             return x
-        elif isinstance(x, str):
+        elif isinstance(x, str) or is_named_tuple(x):
             pass
         elif isinstance(x, np.datetime64):
             x = np.datetime_as_string(x, unit="s") + "Z"
@@ -347,7 +396,12 @@ def repr_(x: Any, *, none: Any = None, map_values: bool = False) -> Representati
 def _repr_generator(*args: tuple[str, Any], prefix: str = "- ") -> Iterator[str]:
     k, _ = zip(*args)
     width = max(map(len, k))
-    return (f"{prefix}{key.rjust(width)}: {repr_(value)}" for key, value in args)
+    for key, value in args:
+        key = f"{prefix}{key.rjust(width)}: "
+        if isinstance(value, np.ndarray) and value.ndim > 1:
+            key += "\n"
+
+        yield f"{key}{repr_(value)}"
 
 
 def join_kv(
@@ -498,6 +552,39 @@ def squish_map(__func: Callable[[_T1], _T2], __iterable: _T1 | Iterable[_T1], /,
     """
 
     return map(__func, squish_chain(__iterable, *args))
+
+
+def iter_pair(x: Pair[Any] | Iterable[Pair[Any]]) -> Iterator[Pair[Any]]:
+    if is_pair(x):
+        yield x
+    else:
+        yield from x
+
+
+@overload
+def items(x: ItemsType[_T1, _T2], /, *args: tuple[_T1, _T2]) -> itertools.chain[tuple[_T1, _T2]]:
+    ...
+
+
+@overload
+def items(x: tuple[_T1, _T2], /, *args: tuple[_T1, _T2]) -> itertools.chain[tuple[_T1, _T2]]:
+    ...
+
+
+def items(x: ItemsType[_T1, _T2] | tuple[_T1, _T2], /, *args: tuple[_T1, _T2]) -> itertools.chain[tuple[_T1, _T2]]:
+    """
+    >>> assert (
+        list(utils.items({"a": 1, "b": 2}))
+        == list(utils.items([("a", 1), ("b", 2)]))
+        == list(utils.items(("a", 1), ("b", 2)))
+        == list(utils.items(zip("ab", (1, 2))))
+        == [("a", 1), ("b", 2)]
+    )
+    """
+    if isinstance(x, tuple):
+        x = iter_pair(x)
+
+    return itertools.chain((x.items() if isinstance(x, Mapping) else x), args)
 
 
 # =====================================================================================================================

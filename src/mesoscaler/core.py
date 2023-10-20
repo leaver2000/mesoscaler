@@ -9,6 +9,7 @@ import xarray as xr
 from pyresample.geometry import GridDefinition
 from xarray.core.coordinates import DatasetCoordinates
 
+from . import _compat
 from ._typing import (
     N2,
     N4,
@@ -17,16 +18,21 @@ from ._typing import (
     Callable,
     Final,
     Hashable,
+    ItemsType,
     Iterable,
     ListLike,
     Literal,
     Mapping,
     N,
-    NDArray,
+    Nt,
     Number,
+    Nv,
+    Nx,
+    Ny,
+    Nz,
+    PointOverTime,
     Self,
     Sequence,
-    TimeSlicePoint,
     TypeAlias,
     Union,
 )
@@ -39,20 +45,27 @@ from .enums import (
     Coordinates,
     DependentVariables,
     Dimensions,
+    DimensionsMapType,
     LiteralCRS,
     T,
+    TypeVar,
     X,
     Y,
     Z,
 )
-from .generic import Data, DataGenerator, DataWorker
-from .sampling.intersection import AbstractIntersection, DatasetIntersection
-from .sampling.resampler import Nt, Nv, Nx, Ny, Nz, ReSampler
+from .generic import Data, DataGenerator, DataSequence, DataWorker
+from .sampling.intersection import (
+    UNITS,
+    AbstractDomain,
+    DatasetSequence,
+    DomainIntersection,
+)
+from .sampling.resampler import ReSampler
 from .sampling.sampler import LinearSampler
-from .utils import log_scale, sort_unique
+from .utils import items, join_kv, log_scale, sort_unique
 
+_T = TypeVar("_T")
 Depends: TypeAlias = Union[type[DependentVariables], DependentVariables, Sequence[DependentVariables], "Dependencies"]
-
 Unit = Literal["km", "m"]
 # =====================================================================================================================
 # - hPa scaling -
@@ -77,7 +90,7 @@ or near surface parameter. The vertical coordinate is then set to the standard s
 
 _units: Mapping[Unit, float] = {"km": 1.0, "m": 1000.0}
 _VARIABLES = "variables"
-_GRID_DEFINITION = "grid_definition"
+_GRID_DEFINITION_ATTRIBUTE = "grid_definition"
 _DEPENDS = "depends"
 
 
@@ -125,10 +138,6 @@ class Dependencies:
     @property
     def metadata(self) -> Mapping[str, Any]:
         return self.enum.metadata  # type: ignore
-
-    # @property
-    # def name(self) -> str:
-    #     return self.enum.name
 
 
 def is_dimension_independent(dims: Iterable[Hashable]) -> bool:
@@ -231,6 +240,9 @@ class IndependentDataset(xr.Dataset):
     def lons(self) -> xr.DataArray:
         return self[LON]
 
+    def select_from(self, x: Mapping[Coordinates, Sequence[Any]]) -> Self:
+        return self.sel({k: self[k].isin(v) for k, v in x.items()})
+
 
 class DependentDataset(IndependentDataset):
     __slots__ = ()
@@ -244,20 +256,16 @@ class DependentDataset(IndependentDataset):
         # - add method to create the dataset from a 4/5d array
         if isinstance(data, DependentDataset) and attrs is None:
             attrs = {
-                _GRID_DEFINITION: data.grid_definition,
+                _GRID_DEFINITION_ATTRIBUTE: data.grid_definition,
                 _DEPENDS: data.depends,
             }
         super().__init__(data, attrs=attrs)
         if depends is not None:  # TODO: these 2 conditionals can be consolidated
             self.attrs[_DEPENDS] = depends
 
-        if _GRID_DEFINITION not in self.attrs:
-            lons, lats = (self[x].to_numpy() for x in (LON, LAT))
-            lons = (lons + 180.0) % 360 - 180.0
-            # TODO: need to write a test for this and insure
-            # the lons are in the range of -180 to 180
-            self.attrs[_GRID_DEFINITION] = GridDefinition(lons, lats)
-        assert is_independent(self)
+        if _GRID_DEFINITION_ATTRIBUTE not in self.attrs:
+            self.set_grid_definition()
+        # assert is_independent(self)
 
     @classmethod
     def from_zarr(cls, store: Any, depends: Depends) -> DependentDataset:
@@ -266,17 +274,26 @@ class DependentDataset(IndependentDataset):
 
     @property
     def grid_definition(self) -> GridDefinition:
-        return self.attrs[_GRID_DEFINITION]
+        return self.attrs[_GRID_DEFINITION_ATTRIBUTE]
 
     @property
     def depends(self) -> Dependencies:
         return self.attrs[_DEPENDS]
 
+    def set_grid_definition(self: DependentDataset) -> DependentDataset:
+        lons, lats = (self[x].to_numpy() for x in (LON, LAT))
+        lons = (lons + 180.0) % 360 - 180.0
+        # TODO: need to write a test for this and insure
+        # the lons are in the range of -180 to 180
+
+        self.attrs[_GRID_DEFINITION_ATTRIBUTE] = GridDefinition(lons, lats)
+        return self
+
 
 # =====================================================================================================================
 # - Resampling
 # =====================================================================================================================
-class Mesoscale(Data[NDArray[np.float_]]):
+class Mesoscale(Data[Array[[...], np.float_]]):
     def __init__(
         self,
         dx: float = DEFAULT_DX,
@@ -285,7 +302,14 @@ class Mesoscale(Data[NDArray[np.float_]]):
         rate: float = DEFAULT_SCALE_RATE,
         levels: ListLike[Number] = DEFAULT_LEVELS,
         troposphere: ListLike[Number] | None = None,
+        xy_units: str = "km",
+        z_units: str = "hPa",
     ) -> None:
+        if xy_units not in UNITS[X, Y]:
+            raise ValueError(f"units must be one of {UNITS[X, Y]}")
+        if z_units not in UNITS[Z]:
+            raise ValueError(f"units must be one of {UNITS[Z]}")
+
         super().__init__()
         # - descending pressure
         tropo = np.asarray(
@@ -299,6 +323,7 @@ class Mesoscale(Data[NDArray[np.float_]]):
         mask = np.isin(tropo, lvls)
         self._scale = scale = log_scale(tropo, rate=rate)[::-1][mask]
         self._dx, self._dy = scale[np.newaxis] * np.array([[dx], [dy or dx]])
+        self._units: DimensionsMapType[str] = {(X, Y): xy_units, Z: z_units}
 
     @staticmethod
     def _arange(
@@ -344,13 +369,33 @@ class Mesoscale(Data[NDArray[np.float_]]):
         return self._dy
 
     @property
+    def unit(self) -> DimensionsMapType[str]:
+        return self._units
+
+    @property
     def area_extent(self) -> Array[[N, N4], np.float_]:
         xy = np.c_[self.dx, self.dy]
         return np.c_[-xy, xy]
 
     @property
-    def data(self) -> Iterable[tuple[str, NDArray[np.float_]]]:
-        yield from (("scale", self.scale), ("levels", self.levels), ("dx", self.dx), ("dy", self.dy))
+    def data(self) -> Iterable[tuple[str, Array[[...], np.float_]]]:
+        yield from (
+            ("scale", self.scale),
+            ("levels", self.levels),
+            ("area_extent", self.area_extent),
+        )  # type: ignore
+
+    # def __repr__(self) -> str:
+    def __repr__(self) -> str:
+        name = self.name
+        size = self.size
+        xy, z = self.unit.values()
+        return join_kv(
+            f"{name}({size=}):",
+            ("scale", self.scale),
+            (f"levels[{z}]", self.levels),
+            (f"extent[{xy}]", self.area_extent),
+        )
 
     def __array__(self) -> Array[[N, N2], np.float_]:
         return self.to_numpy()
@@ -358,15 +403,12 @@ class Mesoscale(Data[NDArray[np.float_]]):
     def __len__(self) -> int:
         return len(self.levels)
 
-    def to_pandas(self) -> pd.DataFrame:
-        return pd.DataFrame(self.to_dict()).set_index("levels").sort_index()
-
     def to_numpy(self, *, units: Unit = "km") -> Array[[N, N2], np.float_]:
         xy = np.c_[self.dx, self.dy] * _units[units]
         return np.c_[-xy, xy]
 
-    def intersection(self, *dsets: DependentDataset) -> DatasetIntersection:
-        return DatasetIntersection.from_datasets(dsets, self)
+    def domain(self, *dsets: DependentDataset) -> DomainIntersection:
+        return DomainIntersection(dsets, self)
 
     def resample(
         self,
@@ -377,15 +419,15 @@ class Mesoscale(Data[NDArray[np.float_]]):
         method: str = "nearest",
     ) -> ReSampler:
         return ReSampler(
-            self.intersection(*dsets), height=height, width=width, target_projection=target_projection, method=method
+            self.domain(*dsets), height=height, width=width, target_projection=target_projection, method=method
         )
 
 
 # =====================================================================================================================
 #
 # =====================================================================================================================
-class DataProducer(DataWorker[TimeSlicePoint, Array[[N, N, N, N, N], np.float_]], AbstractIntersection):
-    def __init__(self, indices: Iterable[TimeSlicePoint], resampler: ReSampler) -> None:
+class DataProducer(DataWorker[PointOverTime, Array[[N, N, N, N, N], np.float_]], AbstractDomain):
+    def __init__(self, indices: Iterable[PointOverTime], resampler: ReSampler) -> None:
         super().__init__(indices, resampler=resampler)
 
     @functools.cached_property
@@ -393,14 +435,15 @@ class DataProducer(DataWorker[TimeSlicePoint, Array[[N, N, N, N, N], np.float_]]
         return self.attrs["resampler"]
 
     @property
-    def intersection(self) -> DatasetIntersection:
-        return self.sampler.intersection
+    def domain(self) -> DomainIntersection:
+        return self.sampler.domain
 
-    def __getitem__(self, idx: TimeSlicePoint) -> Array[[Nv, Nt, Nz, Ny, Nx], np.float_]:
-        time, (lon, lat) = idx
+    def __getitem__(self, idx: PointOverTime) -> Array[[Nv, Nt, Nz, Ny, Nx], np.float_]:
+        (lon, lat), time = idx
+
         return self.sampler(lon, lat, time)
 
-    def get_array(self, idx: TimeSlicePoint, /) -> xr.DataArray:
+    def get_array(self, idx: PointOverTime, /) -> xr.DataArray:
         data = self[idx]
         time, _ = idx
 
@@ -414,21 +457,35 @@ class DataProducer(DataWorker[TimeSlicePoint, Array[[N, N, N, N, N], np.float_]]
             },
         )
 
-    def get_dataset(self, idx: TimeSlicePoint, /) -> xr.Dataset:
+    def get_dataset(self, idx: PointOverTime, /) -> xr.Dataset:
         return self.get_array(idx).to_dataset(_VARIABLES)
 
 
 # =====================================================================================================================
 #  - functions
 # =====================================================================================================================
-def open_datasets(
-    paths: Iterable[tuple[str, Depends]], *, levels: ListLike[Number] | None = None
+def sequence(x: Iterable[_T]) -> DataSequence[_T]:
+    return DataSequence(x)
+
+
+def dataset_sequence(x: Iterable[DependentDataset]) -> DatasetSequence:
+    return DatasetSequence(x)
+
+
+def _open_datasets(
+    paths: ItemsType[str, Depends], *, levels: ListLike[Number] | None = None
 ) -> Iterable[DependentDataset]:
-    for path, depends in paths:
+    for path, depends in items(paths):
         ds = DependentDataset.from_zarr(path, depends)
         if levels is not None:
             ds = ds.sel({LVL: ds.level.isin(levels)})
         yield ds
+
+
+def open_datasets(
+    paths: ItemsType[str, Depends], *, levels: ListLike[Number] | None = None
+) -> DataSequence[DependentDataset]:
+    return dataset_sequence(_open_datasets(paths, levels=levels))
 
 
 def create_resampler(
@@ -463,7 +520,7 @@ def create_resampler(
 
 def data_producer(
     dsets: Iterable[DependentDataset],
-    indices: Iterable[TimeSlicePoint] | Callable[[DatasetIntersection], Iterable[TimeSlicePoint]] = LinearSampler,
+    indices: Iterable[PointOverTime] | Callable[[DomainIntersection], Iterable[PointOverTime]] = LinearSampler,
     *,
     dx: float = DEFAULT_DX,
     dy: float | None = None,
@@ -493,28 +550,28 @@ def data_producer(
     )
     resampler = scale.resample(*dsets, height=height, width=width, target_projection=target_projection, method=method)
     if callable(indices):
-        indices = indices(resampler.intersection, **sampler_kwargs)
+        indices = indices(resampler.domain, **sampler_kwargs)
 
     return DataProducer(indices, resampler=resampler)
 
 
 def data_generator(
     paths: Iterable[tuple[str, Depends]],
-    indices: Iterable[TimeSlicePoint] | Callable[[DatasetIntersection], Iterable[TimeSlicePoint]] = LinearSampler,
+    indices: Iterable[PointOverTime] | Callable[[DomainIntersection], Iterable[PointOverTime]] = LinearSampler,
     *,
-    dx: float = 200,
+    dx: float = DEFAULT_DX,
     dy: float | None = None,
-    start: int = 1000,
-    stop: int = 25 - 1,
-    step: int = -25,
-    p0: float = P0,
-    p1: float = P1,
+    start: int = DEFAULT_LEVEL_START,
+    stop: int = DEFAULT_LEVEL_STOP,
+    step: int = DEFAULT_LEVEL_STEP,
+    p0: float = DEFAULT_PRESSURE_BASE,
+    p1: float = DEFAULT_PRESSURE_TOP,
     rate: float = 1,
     levels: ListLike[Number] = DEFAULT_LEVELS,
-    height: int = 80,
-    width: int = 80,
-    target_projection: LiteralCRS = "lambert_azimuthal_equal_area",
-    method: str = "nearest",
+    height: int = DEFAULT_HEIGHT,
+    width: int = DEFAULT_WIDTH,
+    target_projection: LiteralCRS = DEFAULT_TARGET_PROJECTION,
+    method: str = DEFAULT_RESAMPLE_METHOD,
     # - data consumer -
     maxsize: int = 0,
     timeout: float | None = None,
@@ -542,20 +599,17 @@ def data_generator(
     return DataGenerator(producer, maxsize=maxsize, timeout=timeout)
 
 
-from . import _compat
-
-
 def data_loader(
     paths: Iterable[tuple[str, Depends]],
-    indices: Iterable[TimeSlicePoint] | Callable[[DatasetIntersection], Iterable[TimeSlicePoint]] = LinearSampler,
+    indices: Iterable[PointOverTime] | Callable[[DomainIntersection], Iterable[PointOverTime]] = LinearSampler,
     *,
-    dx: float = 200,
+    dx: float = DEFAULT_DX,
     dy: float | None = None,
-    start: int = 1000,
-    stop: int = 25 - 1,
-    step: int = -25,
-    p0: float = P0,
-    p1: float = P1,
+    start: int = DEFAULT_LEVEL_START,
+    stop: int = DEFAULT_LEVEL_STOP,
+    step: int = DEFAULT_LEVEL_STEP,
+    p0: float = DEFAULT_PRESSURE_BASE,
+    p1: float = DEFAULT_PRESSURE_TOP,
     rate: float = 1,
     levels: ListLike[Number] = DEFAULT_LEVELS,
     height: int = 80,
@@ -565,18 +619,14 @@ def data_loader(
     # - data consumer -
     maxsize: int = 0,
     timeout: float | None = None,
-    #
+    # - data loader -
     batch_size: int | None = 1,
     shuffle: bool | None = None,
-    # sampler: Sampler[Unknown] | Iterable[Unknown] | None = None,
-    # batch_sampler: Sampler[List[Unknown]] | Iterable[List[Unknown]] | None = None,
     num_workers: int = 0,
-    # collate_fn: _collate_fn_t[Unknown] | None = None,
     pin_memory: bool = False,
     drop_last: bool = False,
-    # timeout: float = 0,
     **sampler_kwargs: Any,
-):
+) -> Iterable[Array[[N, N, N, N, N, N], np.float_]]:
     if not _compat._has_torch:
         raise RuntimeError("torch is not installed!")
     dataset = data_generator(

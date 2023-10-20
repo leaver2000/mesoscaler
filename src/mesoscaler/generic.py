@@ -33,6 +33,7 @@ from ._compat import (  # noqa
 )
 from ._typing import (
     Any,
+    Callable,
     Final,
     Generic,
     Hashable,
@@ -41,13 +42,16 @@ from ._typing import (
     Iterator,
     Mapping,
     Self,
+    Sequence,
     Sized,
     TypeVar,
     get_first_order_generic,
+    overload,
 )
 from .utils import join_kv, repr_
 
-_T = TypeVar("_T")
+_T1 = TypeVar("_T1")
+_T2 = TypeVar("_T2")
 
 
 class NamedAndSized(Sized, abc.ABC):
@@ -65,7 +69,7 @@ class NamedAndSized(Sized, abc.ABC):
 # =====================================================================================================================
 #
 # =====================================================================================================================
-class Data(NamedAndSized, Generic[_T], abc.ABC):
+class Data(NamedAndSized, Generic[_T1], abc.ABC):
     """
     ```
     >>> class MyData(Data[int]):
@@ -93,41 +97,84 @@ class Data(NamedAndSized, Generic[_T], abc.ABC):
 
     @property
     @abc.abstractmethod
-    def data(self) -> Iterable[tuple[Hashable, _T]]:
+    def data(self) -> Iterable[tuple[Hashable, _T1]]:
         ...
 
     def __repr__(self) -> str:
         name = self.name
         data = self.data
         size = self.size
-        text = join_kv(f"{name}({size=}):", *data, start=0, stop=5)
+        text = join_kv(f"{name}({size=}):", *data)
         return text
 
-    def to_dict(self) -> dict[Hashable, _T]:
+    def to_dict(self) -> dict[Hashable, _T1]:
         return dict(self.data)
 
 
 # =====================================================================================================================
 # - Iterables
 # =====================================================================================================================
-class DataSampler(
-    NamedAndSized,
-    Iterable[_T],
-    Sampler[_T],
-    abc.ABC,
-):
+class DataSampler(NamedAndSized, Iterable[_T1], Sampler[_T1], abc.ABC):
     ...
+
+
+class DataSequence(NamedAndSized, Sequence[_T1]):
+    def __init__(self, data: Iterable[_T1]) -> None:
+        super().__init__()
+        self._data = data
+
+    @property
+    def data(self) -> tuple[_T1, ...]:
+        if not isinstance(self._data, tuple):
+            self._data = tuple(self._data)
+        return self._data
+
+    def __iter__(self) -> Iterator[_T1]:
+        return iter(self._data)
+
+    @overload
+    def __getitem__(self, idx: int, /) -> _T1:
+        ...
+
+    @overload
+    def __getitem__(self, idx: slice, /) -> Self:
+        ...
+
+    def __getitem__(self, idx: int | slice) -> _T1 | Self:
+        if isinstance(idx, slice):
+            return self.__class__(self.data[idx])
+        return self.data[idx]
+
+    def __len__(self) -> int:
+        return len(self.data)
+
+    def __repr__(self):
+        name = self.name
+        size = self.size
+        text = "\n".join(repr_(x) for x in self.data)
+        return f"{name}({size=})[\n{text}\n]"
+
+    @overload
+    def map(self, func: Callable[[_T1], _T1]) -> Self:
+        ...
+
+    @overload
+    def map(self, func: Callable[[_T1], _T2]) -> DataSequence[_T2]:
+        ...
+
+    def map(self, func: Callable[[_T1], _T1] | Callable[[_T1], _T2]) -> Self | DataSequence[_T2]:
+        return self.__class__(map(func, self.data))
 
 
 # =====================================================================================================================
 # - Mappings
 # =====================================================================================================================
-class DataMapping(NamedAndSized, Mapping[HashableT, _T]):
-    def __init__(self, data: Mapping[HashableT, _T]) -> None:
+class DataMapping(NamedAndSized, Mapping[HashableT, _T1]):
+    def __init__(self, data: Mapping[HashableT, _T1]) -> None:
         super().__init__()
         self._data = dict(data)
 
-    def __getitem__(self, key: HashableT) -> _T:
+    def __getitem__(self, key: HashableT) -> _T1:
         return self._data[key]
 
     def __iter__(self) -> Iterator[HashableT]:
@@ -136,18 +183,18 @@ class DataMapping(NamedAndSized, Mapping[HashableT, _T]):
     def __len__(self) -> int:
         return len(self._data)
 
-    def __or__(self, other: DataMapping[HashableT, _T] | dict[HashableT, _T]) -> DataMapping[HashableT, _T]:
+    def __or__(self, other: DataMapping[HashableT, _T1] | dict[HashableT, _T1]) -> DataMapping[HashableT, _T1]:
         return DataMapping(self._data | (other._data if isinstance(other, DataMapping) else other))
 
 
-class DataWorker(NamedAndSized, Mapping[HashableT, _T], abc.ABC):
+class DataWorker(NamedAndSized, Mapping[HashableT, _T1], abc.ABC):
     def __init__(self, indices: Iterable[HashableT], **config: Any) -> None:
         super().__init__()
         self.indices: Final[list[HashableT]] = list(indices)
         self.attrs: Final[DataMapping[str, Any]] = DataMapping(config)
 
     @abc.abstractmethod
-    def __getitem__(self, key: HashableT) -> _T:
+    def __getitem__(self, key: HashableT) -> _T1:
         ...
 
     def __len__(self) -> int:
@@ -189,18 +236,18 @@ class DataWorker(NamedAndSized, Mapping[HashableT, _T], abc.ABC):
 # =====================================================================================================================
 # - DataGenerator
 # =====================================================================================================================
-class DataGenerator(NamedAndSized, IterableDataset[_T]):
+class DataGenerator(NamedAndSized, IterableDataset[_T1]):
     def __init__(
         self,
-        worker: Mapping[HashableT, _T] | Mapping[HashableT, _T],
+        worker: Mapping[HashableT, _T1] | Mapping[HashableT, _T1],
         *,
         maxsize: int = 0,
         timeout: float | None = None,
     ) -> None:
         super().__init__()
         self.thread: Final[threading.Thread] = threading.Thread(target=self._target, name=self.name, daemon=True)
-        self.queue: Final[queue.Queue[_T]] = queue.Queue(maxsize=maxsize)
-        self.worker: Final[Mapping[HashableT, _T]] = worker
+        self.queue: Final[queue.Queue[_T1]] = queue.Queue(maxsize=maxsize)
+        self.worker: Final[Mapping[HashableT, _T1]] = worker
         self.timeout: Final[float | None] = timeout
 
     def _target(self) -> None:
@@ -210,7 +257,7 @@ class DataGenerator(NamedAndSized, IterableDataset[_T]):
     def __len__(self) -> int:
         return len(self.worker)
 
-    def __iter__(self) -> Iterator[_T]:
+    def __iter__(self) -> Iterator[_T1]:
         if not self.thread.is_alive():
             self.start()
         # range is the safest option here, because the queue size may change

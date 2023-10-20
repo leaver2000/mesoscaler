@@ -19,7 +19,7 @@ from ._typing import (
     Point,
     Self,
     TimeSlice,
-    TimeSlicePoint,
+    PointOverTime,
 )
 from .enums import TimeFrequency, TimeFrequencyLike
 from .generic import DataSampler
@@ -73,17 +73,17 @@ class Intersection:
         return np.linspace(mn, mx, frequency).round(round)
 
 
-class AbstractSampler(DataSampler[TimeSlicePoint], abc.ABC):
-    _indices: list[TimeSlicePoint] | None
+class AbstractSampler(DataSampler[PointOverTime], abc.ABC):
+    _indices: list[PointOverTime] | None
 
-    def __init__(self, intersection: Intersection) -> None:
+    def __init__(self, domain: Intersection) -> None:
         super().__init__()
-        self.intersection = intersection
+        self.domain = domain
         self._indices = None
 
     # =================================================================================================================
     @property
-    def indices(self) -> list[TimeSlicePoint]:
+    def indices(self) -> list[PointOverTime]:
         if self._indices is None:
             self._indices = indices = list(self.iter_indices())
             return indices
@@ -116,11 +116,11 @@ class AbstractSampler(DataSampler[TimeSlicePoint], abc.ABC):
         lons, lats = self.get_lon_lats()
         return ((x, y) for x in lons for y in lats)
 
-    def iter_indices(self) -> Iterator[TimeSlicePoint]:
+    def iter_indices(self) -> Iterator[PointOverTime]:
         return itertools.product(self.iter_time(), self.iter_points())
 
     # =================================================================================================================
-    def __iter__(self) -> Iterator[TimeSlicePoint]:
+    def __iter__(self) -> Iterator[PointOverTime]:
         return self.iter_indices()
 
     def __len__(self) -> int:
@@ -156,8 +156,8 @@ class TimeSampler(AbstractSampler):
         step: int | datetime.timedelta | np.timedelta64 | None = None,
     ) -> Array[[N], np.datetime64]:
         freq = self.time_frequency
-        start = start or self.intersection.min_time
-        stop = freq.datetime(stop or self.intersection.max_time)
+        start = start or self.domain.min_time
+        stop = freq.datetime(stop or self.domain.max_time)
         stop += freq.timedelta(1)  # end is exclusive
         return freq.arange(start, stop, step)
 
@@ -176,8 +176,8 @@ class LinearSampler(TimeSampler):
     def get_lon_lats(self) -> tuple[Array[[N], np.float_], Array[[N], np.float_]]:
         frequency = self.lon_lat_frequency
         return (
-            self.intersection.linspace("lon", frequency=frequency),
-            self.intersection.linspace("lat", frequency=frequency),
+            self.domain.linspace("lon", frequency=frequency),
+            self.domain.linspace("lat", frequency=frequency),
         )
 
 
@@ -200,9 +200,9 @@ class ExtentBoundLinearSampler(TimeSampler):
     def get_lon_lats(self) -> tuple[Array[[N], np.float_], Array[[N], np.float_]]:
         frequency = self.lon_lat_frequency
         x_min, y_min, x_max, y_max = self.area_extent
-        if self.intersection.min_lat > y_min or self.intersection.max_lat < y_max:
+        if self.domain.min_lat > y_min or self.domain.max_lat < y_max:
             raise ValueError(f"area_extent latitude bounds {y_min, y_max} are outside dataset bounds")
-        elif self.intersection.min_lon > x_min or self.intersection.max_lon < x_max:
+        elif self.domain.min_lon > x_min or self.domain.max_lon < x_max:
             raise ValueError(f"area_extent longitude bounds {x_min, x_max} are outside dataset bounds")
 
         return np.linspace(x_min, x_max, frequency), np.linspace(y_min, y_max, frequency)

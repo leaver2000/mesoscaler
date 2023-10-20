@@ -6,18 +6,24 @@ import numpy as np
 import pyresample.geometry
 from pyresample.geometry import AreaDefinition, GridDefinition
 
-from .._typing import Any, Array, Callable, Latitude, Longitude, N, NewType, TimeSlice
+from .._typing import (
+    Any,
+    Array,
+    Callable,
+    Iterator,
+    Latitude,
+    Longitude,
+    N,
+    Nt,
+    Nv,
+    Nx,
+    Ny,
+    Nz,
+    TimeSlice,
+)
 from ..enums import TIME, CoordinateReferenceSystem, LiteralCRS, X, Y
 from ..utils import area_definition
-from .intersection import AbstractIntersection, DatasetIntersection
-
-# if TYPE_CHECKING:
-
-Nv = NewType("Nv", int)
-Nx = NewType("Nx", int)
-Ny = NewType("Ny", int)
-Nt = NewType("Nt", int)
-Nz = NewType("Nz", int)
+from .intersection import AbstractDomain, DatasetAndExtent, DomainIntersection
 
 
 def _get_resample_method(
@@ -51,15 +57,15 @@ def _get_resample_method(
     return functools.partial(func, **kwargs)
 
 
-class ReSampler(AbstractIntersection):
+class ReSampler(AbstractDomain):
     # There are alot of callbacks and partial methods in this class.
     @property
-    def intersection(self) -> DatasetIntersection:
-        return self._intersection
+    def domain(self) -> DomainIntersection:
+        return self._domain
 
     def __init__(
         self,
-        intersection: DatasetIntersection,
+        domain: DomainIntersection,
         /,
         *,
         height: int = 80,
@@ -75,7 +81,7 @@ class ReSampler(AbstractIntersection):
         with_uncert: bool = False,
     ) -> None:
         super().__init__()
-        self._intersection = intersection
+        self._domain = domain
         self.height = height
         self.width = width
         self.target_projection = (
@@ -102,7 +108,7 @@ class ReSampler(AbstractIntersection):
         )
 
     def _resample_point_over_time(
-        self, longitude: Longitude, latitude: Latitude, time: TimeSlice
+        self, longitude: Longitude, latitude: Latitude, time: TimeSlice | Array[[N], np.datetime64]
     ) -> list[Array[[Ny, Nx, N], np.float_]]:
         """resample the data along the vertical scale for a single point over time.
         each item in the list is a 3-d array that can be stacked into along the vertical axis.
@@ -119,17 +125,20 @@ class ReSampler(AbstractIntersection):
                 ds.sel({TIME: time}).to_stacked_array("C", [Y, X]).to_numpy(),
                 area_definition(area_extent=area_extent),
             )
-            for ds, area_extent in self.intersection.iter_dataset_and_extent()
+            for ds, area_extent in self.domain.iter_dataset_and_extent()
         ]
 
     def __call__(
-        self, longitude: Longitude, latitude: Latitude, time: TimeSlice
+        self, longitude: Longitude, latitude: Latitude, time: TimeSlice | Array[[N], np.datetime64]
     ) -> Array[[Nv, Nt, Nz, Ny, Nx], np.float_]:
         """stack the data along `Nz` and reshape and unsqueeze the data to match the expected output."""
         arr = np.stack(self._resample_point_over_time(longitude, latitude, time))  # (z, y, x, v*t)
 
         # - reshape the data
-        t = len(self.intersection.slice_time(time))
+        # t = len(self.slice_time(time))
         z, y, x = arr.shape[:3]
-        arr = arr.reshape((z, y, x, t, -1))  # unsqueeze C
+        arr = arr.reshape((z, y, x, -1, self.n_vars))  # unsqueeze C
         return np.moveaxis(arr, (-1, -2), (0, 1))
+
+    def iter_dataset_and_extent(self) -> Iterator[DatasetAndExtent]:
+        return zip(self.datasets, self.area_extents)
