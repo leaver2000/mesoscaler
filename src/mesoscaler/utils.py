@@ -300,7 +300,12 @@ def interp_frames(
     return interp(values).astype(arr.dtype)
 
 
-def overlapping(data: list[Array[[N], NumpyGeneric_T]], sort: bool = True) -> Array[[N], NumpyGeneric_T]:
+def overlapping(data: Sequence[Array[[N], NumpyGeneric_T]], sort: bool = True) -> Array[[N], NumpyGeneric_T]:
+    # TODO: need to check if the function below is equivalent to this function
+    # import functools
+    # import numpy as np
+    # f = functools.reduce(np.intersect1d, data)
+
     x = np.unique(np.concatenate(data))
     mask = np.stack([np.isin(x, y) for y in data], axis=1).all(axis=1)
     x = x[mask]
@@ -312,17 +317,9 @@ def overlapping(data: list[Array[[N], NumpyGeneric_T]], sort: bool = True) -> Ar
 # =====================================================================================================================
 # - repr utils
 # =====================================================================================================================
-
-
 class Representation(str):
     array_ = staticmethod(
-        functools.partial(
-            np.array2string,
-            max_line_width=100,
-            precision=2,
-            separator=" ",
-            floatmode="fixed",
-        )
+        functools.partial(np.array2string, max_line_width=100, precision=2, separator=" ", floatmode="fixed")
     )
 
     @classmethod

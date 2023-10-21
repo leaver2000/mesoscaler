@@ -23,7 +23,7 @@ from .._typing import (
 )
 from ..enums import TIME, CoordinateReferenceSystem, LiteralCRS, X, Y
 from ..utils import area_definition
-from .intersection import AbstractDomain, DatasetAndExtent, DomainIntersection
+from .domain import AbstractDomain, DatasetAndExtent, Domain
 
 
 def _get_resample_method(
@@ -60,12 +60,12 @@ def _get_resample_method(
 class ReSampler(AbstractDomain):
     # There are alot of callbacks and partial methods in this class.
     @property
-    def domain(self) -> DomainIntersection:
+    def domain(self) -> Domain:
         return self._domain
 
     def __init__(
         self,
-        domain: DomainIntersection,
+        domain: Domain,
         /,
         *,
         height: int = 80,

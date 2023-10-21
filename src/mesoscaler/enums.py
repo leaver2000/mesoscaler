@@ -50,8 +50,8 @@ DimensionsMapType: TypeAlias = Mapping[tuple[Literal[X], Literal[Y]] | Literal[Z
 class Coordinates(IndependentVariables):
     time = auto_field(axis=(T,))
     vertical = auto_field(aliases=["level", "height"], axis=(Z,))
-    latitude = auto_field(aliases=["grid_latitude"], axis=(Y, X))
-    longitude = auto_field(aliases=["grid_longitude"], axis=(Y, X))
+    latitude = auto_field(aliases=["grid_latitude", "lat"], axis=(Y, X))
+    longitude = auto_field(aliases=["grid_longitude", "lon"], axis=(Y, X))
 
     @property
     def axis(self) -> tuple[Dimensions, ...]:

@@ -41,4 +41,4 @@ def dataset_sequence(data_paths) -> mesoscaler.DatasetSequence:
         e[TIME] = e[TIME].to_numpy() + np.timedelta64(datetime.timedelta(hours=i))
         era5.append(e)
 
-    return mesoscaler.dataset_sequence([xr.concat(urma, dim=TIME), xr.concat(era5, dim=TIME)])
+    return mesoscaler.DatasetSequence([xr.concat(urma, dim=TIME), xr.concat(era5, dim=TIME)])

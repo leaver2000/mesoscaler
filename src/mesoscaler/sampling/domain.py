@@ -13,6 +13,7 @@ from .._typing import (
     N4,
     TYPE_CHECKING,
     Any,
+    AnyArrayLike,
     AreaExtent,
     Array,
     Iterable,
@@ -23,9 +24,18 @@ from .._typing import (
     Sequence,
     TimeSlice,
 )
-
-# from pyresample.geometry import AreaDefinition, GridDefinition
-from ..enums import LAT, LON, LVL, TIME, Coordinates, DimensionsMapType, X, Y, Z
+from ..enums import (
+    LAT,
+    LON,
+    LVL,
+    TIME,
+    Coordinates,
+    Dimensions,
+    DimensionsMapType,
+    X,
+    Y,
+    Z,
+)
 from ..generic import Callable, DataSampler, DataSequence, Mapping, TypeVar
 from ..utils import repr_, slice_time
 
@@ -40,11 +50,14 @@ else:
 
 UNITS: DimensionsMapType[tuple[str, ...]] = {(X, Y): ("km", "m"), Z: ("hPa",)}
 DatasetAndExtent = tuple[DependentDataset, AreaExtent]
+from pandas._typing import AnyArrayLike
 
 
 class BoundingBox(NamedTuple):
     """
     >>> min_lon, min_lat, max_lon, max_lat = -180.0, 180.0, -90.0, 90.0
+    >>> x0, y0, x1, y1 = west, south, east, north = BoundingBox(min_lon, min_lat, max_lon, max_lat)
+    >>>
     """
 
     west: float
@@ -65,15 +78,52 @@ class BoundingBox(NamedTuple):
             and other.north <= self.north
         )
 
+    @property
+    def x(self) -> tuple[float, float]:
+        return self.west, self.east
+
+    @property
+    def y(self) -> tuple[float, float]:
+        return self.south, self.north
+
+    @property
+    def xy0(self) -> tuple[float, float]:
+        return self.west, self.south
+
+    @property
+    def xy1(self) -> tuple[float, float]:
+        return self.east, self.north
+
+    def linspace(self, key: str, *, frequency: int, round: int = 5) -> Array[[N], Any]:
+        if key.upper() == X:
+            start, stop = self.x
+        elif key.upper() == Y:
+            start, stop = self.y
+        else:
+            raise KeyError(f"key {key} is not supported!")
+        return np.linspace(start, stop, frequency).round(round)
+
+    def meshgrid(self, frequency: int) -> tuple[Array[[N, N], np.float_], Array[[N, N], np.float_]]:
+        x, y = np.meshgrid(self.linspace(X, frequency=frequency), self.linspace(Y, frequency=frequency))
+        return x, y
+
     def __array__(self) -> Array[[N4], np.float_]:
         return np.array(self)
 
     def to_numpy(self) -> Array[[N4], np.float_]:
         return np.array(self)
 
+    def intersect2d(
+        self, lon: AnyArrayLike[np.float_], lat: AnyArrayLike[np.float_]
+    ) -> dict[Dimensions, AnyArrayLike[np.bool_]]:
+        x0, y0, x1, y1 = self
+        x0 = (x0 - 180.0) % 360 + 180.0
+        x1 = (x1 - 180.0) % 360 + 180.0
+        return {X: ((lon >= x0) & (lon <= x1)).any(axis=0), Y: ((lat >= y0) & (lat <= y1)).any(axis=1)}
+
 
 class DatasetSequence(DataSequence[DependentDataset]):
-    def get_coordinates(self) -> dict[Coordinates, list[Array[[...], Any]]]:
+    def get_coordinates(self) -> Mapping[Coordinates, Sequence[Array[[...], Any]]]:
         return {
             LON: [((ds[LON].to_numpy() - 180.0) % 360 - 180.0) for ds in self],
             LAT: [ds[LAT].to_numpy() for ds in self],
@@ -81,45 +131,36 @@ class DatasetSequence(DataSequence[DependentDataset]):
             LVL: [ds[LVL].to_numpy() for ds in self],
         }
 
-    def get_intersection(self, scale: Mesoscale) -> DomainIntersection:
-        return DomainIntersection(self, scale)
+    def get_domain(self, scale: Mesoscale) -> Domain:
+        return scale.get_domain(self)
 
-    def fit_lon_lat(self, bbox: BoundingBox):
-        return DatasetSequence(_fit_lon_lat(self, bbox))
-
-    def batch_time(self, batcher: Array[[N, N], np.datetime64]):
+    def batch_time(self, batcher: Array[[N, N], np.datetime64]) -> DatasetSequence:
         return DatasetSequence(_batch_time(self, batcher))
 
-    def _repr_html_(self) -> str:
-        return "\n".join(ds._repr_html_() for ds in self)
-
-    def fit_domain(self, domain: AbstractDomain) -> DatasetSequence:
-        min_lon, min_lat, max_lon, max_lat = domain.bbox
-        min_lon = (min_lon - 180.0) % 360 + 180.0
-        max_lon = (max_lon - 180.0) % 360 + 180.0
+    def fit(self, x: AbstractDomain | Mesoscale, /) -> DatasetSequence:
+        domain = x if isinstance(x, AbstractDomain) else self.get_domain(x)
 
         return DatasetSequence(
             ds.sel(
-                {
-                    LVL: ds[LVL].isin(domain.levels),
-                    TIME: ds[TIME].isin(domain.time),
-                    X: ((ds[LON] >= min_lon) & (ds[LON] <= max_lon)).any(axis=0),
-                    Y: ((ds[LAT] >= min_lat) & (ds[LAT] <= max_lat)).any(axis=1),
-                }
+                {TIME: ds[TIME].isin(domain.time), LVL: ds[LVL].isin(domain.levels)}
+                | domain.bbox.intersect2d(ds[LON], ds[LAT])
             ).set_grid_definition()
             for ds in self
         )
 
-    def batch_from(self, x: Mapping[Coordinates, Iterable[Sequence[float | np.datetime64]]]):
+    def batch(self, x: Mapping[Coordinates, Iterable[Sequence[float | np.datetime64]]]) -> DatasetSequence:
         return DatasetSequence(
             ds.select_from({k: batch}) for ds in self for k, batcher in x.items() for batch in batcher
         )
+
+    def _repr_html_(self) -> str:
+        return "\n".join(ds._repr_html_() for ds in self)
 
 
 class AbstractDomain(abc.ABC):
     @property
     @abc.abstractmethod
-    def domain(self) -> DomainIntersection:
+    def domain(self) -> Domain:
         ...
 
     @property
@@ -141,6 +182,8 @@ class AbstractDomain(abc.ABC):
     @property
     def max_lat(self) -> float:
         return self.bbox.north
+
+    x0, y0, x1, y1 = min_lon, min_lat, max_lon, max_lat
 
     # - AreaExtent -
     @property
@@ -237,27 +280,23 @@ class AbstractDomain(abc.ABC):
         return extents
 
 
-class DomainIntersectionSampler(
-    DataSampler[_T],
-    AbstractDomain,
-    abc.ABC,
-):
+class DomainIntersectionSampler(DataSampler[_T], AbstractDomain, abc.ABC):
     @property
-    def domain(self) -> DomainIntersection:
+    def domain(self) -> Domain:
         return self._domain
 
-    def __init__(self, domain: DomainIntersection) -> None:
+    def __init__(self, domain: Domain) -> None:
         super().__init__()
         self._domain = domain
 
     @classmethod
-    def partial(cls, *args: Any, **kwargs: Any) -> Callable[[DomainIntersection], Self]:
+    def partial(cls, *args: Any, **kwargs: Any) -> Callable[[Domain], Self]:
         return functools.partial(cls, *args, **kwargs)
 
 
-class DomainIntersection(AbstractDomain):
+class Domain(AbstractDomain):
     @property
-    def domain(self) -> DomainIntersection:
+    def domain(self) -> Domain:
         return self
 
     def __init__(self, datasets: Iterable[DependentDataset], scale: Mesoscale) -> None:
@@ -278,37 +317,12 @@ class DomainIntersection(AbstractDomain):
 
     def __repr__(self) -> str:
         items = self._repr_args()
-        return utils.join_kv("DomainIntersection:", *items)
+        return utils.join_kv("Domain:", *items)
 
 
 # =====================================================================================================================
 # - core functions for determining the domain of datasets
 # =====================================================================================================================
-
-
-def _fit_lon_lat(
-    self: Iterable[DependentDataset],
-    bbox: BoundingBox,
-) -> Iterator[DependentDataset]:
-    min_lon, max_lon, min_lat, max_lat = bbox
-    return (_mask_single_dataset_lon_lat(ds, min_lon, max_lon, min_lat, max_lat) for ds in self)
-
-
-def _mask_single_dataset_lon_lat(
-    ds: DependentDataset,
-    min_lon: float,
-    max_lon: float,
-    min_lat: float,
-    max_lat: float,
-) -> DependentDataset:
-    lons = (ds.lons.to_numpy() + 180.0) % 360 - 180.0
-    lats = ds.lats.to_numpy()
-    x_mask = (lons >= min_lon) & (lons <= max_lon)
-    y_mask = (lats >= min_lat) & (lats <= max_lat)
-    ds = ds.sel({X: x_mask.any(axis=0), Y: y_mask.any(axis=1)})
-    return ds.set_grid_definition()
-
-
 def _batch_time(self: Iterable[DependentDataset], batcher: Array[[N, N], np.datetime64]) -> Iterator[DependentDataset]:
     return (ds.sel({TIME: ds[TIME].isin(t)}) for t in batcher for ds in self)
 
@@ -331,16 +345,16 @@ def _get_intersection(
     levels = np.concatenate(coords[LVL])
 
     # - T
-    time = utils.overlapping(coords[TIME], sort=True)
+    time = utils.overlapping(coords[TIME], sort=True)  # type: Array[[N], np.datetime64]
     dsets = DatasetSequence(ds.sel({TIME: ds.time.isin(time)}) for ds in dsets)
     min_time, max_time = time[0], time[-1]
 
     # - XY
-    (min_lon, max_lon) = _min_max(coords[LON])
-    (min_lat, max_lat) = _min_max(coords[LAT])
+    (x0, x1) = _min_max(coords[LON])
+    (y0, y1) = _min_max(coords[LAT])
 
     return (
-        BoundingBox(min_lon, min_lat, max_lon, max_lat),
+        BoundingBox(x0, y0, x1, y1),
         np.s_[min_time:max_time],
         time,
         np.sort(levels[np.isin(levels, scale.levels)])[::-1],  # descending,
@@ -350,7 +364,7 @@ def _get_intersection(
     )
 
 
-def _min_max(arr: list[Array[[...], np.float_]]) -> tuple[float, float]:
+def _min_max(arr: Sequence[Array[[...], np.float_]]) -> tuple[float, float]:
     mins = []
     maxs = []
     for x in arr:

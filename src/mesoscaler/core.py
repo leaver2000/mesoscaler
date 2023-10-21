@@ -1,21 +1,22 @@
 from __future__ import annotations
 
+import datetime
 import functools
 
 import numpy as np
 import pandas as pd
 import pyproj
 import xarray as xr
+import xarray.core.formatting_html
 from pyresample.geometry import GridDefinition
 from xarray.core.coordinates import DatasetCoordinates
 
-from . import _compat
 from ._typing import (
     N2,
     N4,
     Any,
     Array,
-    Callable,
+    ArrayLike,
     Final,
     Hashable,
     ItemsType,
@@ -33,6 +34,7 @@ from ._typing import (
     PointOverTime,
     Self,
     Sequence,
+    StrPath,
     TypeAlias,
     Union,
 )
@@ -53,15 +55,9 @@ from .enums import (
     Y,
     Z,
 )
-from .generic import Data, DataGenerator, DataSequence, DataWorker
-from .sampling.intersection import (
-    UNITS,
-    AbstractDomain,
-    DatasetSequence,
-    DomainIntersection,
-)
+from .generic import Data, DataSequence, DataWorker
+from .sampling.domain import UNITS, AbstractDomain, DatasetSequence, Domain
 from .sampling.resampler import ReSampler
-from .sampling.sampler import LinearSampler
 from .utils import items, join_kv, log_scale, sort_unique
 
 _T = TypeVar("_T")
@@ -93,6 +89,11 @@ _VARIABLES = "variables"
 _GRID_DEFINITION_ATTRIBUTE = "grid_definition"
 _DEPENDS = "depends"
 
+CoordinateValue: TypeAlias = (
+    ListLike[float | np.datetime64 | datetime.datetime | str] | ArrayLike[np.float_ | np.datetime64]
+)
+DataValue: TypeAlias = ArrayLike | xr.DataArray | xr.Dataset
+
 
 # =====================================================================================================================
 # - tools for preparing to data into a common format and convention
@@ -121,7 +122,11 @@ class Dependencies:
         self.enum, self.depends = self._validate_variables(depends)
 
     def __repr__(self) -> str:
-        return f"{self.__class__.__name__}({self.enum.__name__})"
+        return f"{self.__class__.__name__}({self.dataset_name})"
+
+    @property
+    def dataset_name(self) -> str:
+        return self.enum.__name__
 
     @property
     def difference(self) -> set[DependentVariables]:
@@ -138,156 +143,6 @@ class Dependencies:
     @property
     def metadata(self) -> Mapping[str, Any]:
         return self.enum.metadata  # type: ignore
-
-
-def is_dimension_independent(dims: Iterable[Hashable]) -> bool:
-    return all(isinstance(dim, Dimensions) for dim in dims) and set(dims) == set(Dimensions)
-
-
-def is_coordinate_independent(coords: DatasetCoordinates) -> bool:
-    return (
-        all(isinstance(coord, Coordinates) for coord in coords)
-        and set(coords) == set(Coordinates)
-        and all(coords[x].dims == (Y, X) for x in (LON, LAT))
-    )
-
-
-def is_independent(ds: xr.Dataset) -> bool:
-    return is_coordinate_independent(ds.coords) and is_dimension_independent(ds.dims)
-
-
-def make_independent(ds: xr.Dataset) -> xr.Dataset:
-    """insures a dependant dataset is in the correct format."""
-    if is_independent(ds):
-        return ds
-    #  - rename the dims and coordinates
-    ds = ds.rename_dims(Dimensions.remap(ds.dims)).rename_vars(Coordinates.remap(ds.coords))
-    # - move any coordinates assigned as variables to the coordinates
-    ds = ds.set_coords(Coordinates.intersection(ds.variables))
-    ds = ds.rename_vars(Coordinates.remap(ds.coords))
-
-    ds[LON], ds[LAT] = (ds[coord].compute() for coord in (LON, LAT))
-
-    # - dimension assignment
-    if missing_dims := Dimensions.difference(ds.dims):
-        for dim in missing_dims:
-            ds = ds.expand_dims(dim, axis=[DIMENSIONS.index(dim)])
-
-    # # - coordinate assignment
-    if missing_coords := Coordinates.difference(ds.coords):
-        if missing_coords != {LVL}:
-            raise ValueError(f"missing coordinates {missing_coords}; only {LVL} is allowed to be missing!")
-        ds = ds.assign_coords(DERIVED_SURFACE_COORDINATE).set_xindex(LVL)
-
-    if ds[LAT].dims == (Y,) and ds[LON].dims == (X,):
-        # 5.2. Two-Dimensional Latitude, Longitude, Coordinate
-        # Variables
-        # The latitude and longitude coordinates of a horizontal grid that was not defined as a Cartesian
-        # product of latitude and longitude axes, can sometimes be represented using two-dimensional
-        # coordinate variables. These variables are identified as coordinates by use of the coordinates
-        # attribute
-        lon, lat = (ds[coord].to_numpy() for coord in (LON, LAT))
-        yy, xx = np.meshgrid(lat, lon, indexing="ij")
-
-        ds = ds.assign_coords({LAT: (LAT.axis, yy), LON: (LON.axis, xx)})
-
-    ds = ds.transpose(*DIMENSIONS)
-
-    return ds
-
-
-# =====================================================================================================================
-# - the dataset
-# =====================================================================================================================
-class IndependentDataset(xr.Dataset):
-    __slots__ = ()
-
-    @classmethod
-    def from_dependant(cls, ds: xr.Dataset, **kwargs) -> Self:
-        return cls(make_independent(ds), **kwargs)
-
-    # - dims
-    @property
-    def t(self) -> xr.DataArray:
-        return self[T]
-
-    @property
-    def z(self) -> xr.DataArray:
-        return self[Z]
-
-    @property
-    def y(self) -> xr.DataArray:
-        return self[Y]
-
-    @property
-    def x(self) -> xr.DataArray:
-        return self[X]
-
-    # - coords
-    @property
-    def time(self) -> xr.DataArray:
-        return self[TIME]
-
-    @property
-    def level(self) -> xr.DataArray:
-        return self[LVL]
-
-    @property
-    def lats(self) -> xr.DataArray:
-        return self[LAT]
-
-    @property
-    def lons(self) -> xr.DataArray:
-        return self[LON]
-
-    def select_from(self, x: Mapping[Coordinates, Sequence[Any]]) -> Self:
-        return self.sel({k: self[k].isin(v) for k, v in x.items()})
-
-
-class DependentDataset(IndependentDataset):
-    __slots__ = ()
-    __dims__ = (T, Z, Y, X)
-    __coords__ = (TIME, LVL, LAT, LON)
-
-    def __init__(
-        self, data: xr.Dataset, *, attrs: Mapping[str, Any] | None = None, depends: Depends | None = None
-    ) -> None:
-        # TODO:
-        # - add method to create the dataset from a 4/5d array
-        if isinstance(data, DependentDataset) and attrs is None:
-            attrs = {
-                _GRID_DEFINITION_ATTRIBUTE: data.grid_definition,
-                _DEPENDS: data.depends,
-            }
-        super().__init__(data, attrs=attrs)
-        if depends is not None:  # TODO: these 2 conditionals can be consolidated
-            self.attrs[_DEPENDS] = depends
-
-        if _GRID_DEFINITION_ATTRIBUTE not in self.attrs:
-            self.set_grid_definition()
-        # assert is_independent(self)
-
-    @classmethod
-    def from_zarr(cls, store: Any, depends: Depends) -> DependentDataset:
-        depends = Dependencies(depends)
-        return cls.from_dependant(xr.open_zarr(store, drop_variables=depends.difference), depends=depends)
-
-    @property
-    def grid_definition(self) -> GridDefinition:
-        return self.attrs[_GRID_DEFINITION_ATTRIBUTE]
-
-    @property
-    def depends(self) -> Dependencies:
-        return self.attrs[_DEPENDS]
-
-    def set_grid_definition(self: DependentDataset) -> DependentDataset:
-        lons, lats = (self[x].to_numpy() for x in (LON, LAT))
-        lons = (lons + 180.0) % 360 - 180.0
-        # TODO: need to write a test for this and insure
-        # the lons are in the range of -180 to 180
-
-        self.attrs[_GRID_DEFINITION_ATTRIBUTE] = GridDefinition(lons, lats)
-        return self
 
 
 # =====================================================================================================================
@@ -407,8 +262,8 @@ class Mesoscale(Data[Array[[...], np.float_]]):
         xy = np.c_[self.dx, self.dy] * _units[units]
         return np.c_[-xy, xy]
 
-    def domain(self, *dsets: DependentDataset) -> DomainIntersection:
-        return DomainIntersection(dsets, self)
+    def get_domain(self, dsets: Iterable[DependentDataset]) -> Domain:
+        return Domain(dsets, self)
 
     def resample(
         self,
@@ -419,14 +274,186 @@ class Mesoscale(Data[Array[[...], np.float_]]):
         method: str = "nearest",
     ) -> ReSampler:
         return ReSampler(
-            self.domain(*dsets), height=height, width=width, target_projection=target_projection, method=method
+            self.get_domain(dsets), height=height, width=width, target_projection=target_projection, method=method
         )
+
+
+# =====================================================================================================================
+def is_dimension_independent(dims: Iterable[Hashable]) -> bool:
+    return all(isinstance(dim, Dimensions) for dim in dims) and set(dims) == set(Dimensions)
+
+
+def is_coordinate_independent(coords: DatasetCoordinates) -> bool:
+    return (
+        all(isinstance(coord, Coordinates) for coord in coords)
+        and set(coords) == set(Coordinates)
+        and all(coords[x].dims == (Y, X) for x in (LON, LAT))
+    )
+
+
+def is_independent(ds: xr.Dataset) -> bool:
+    return is_coordinate_independent(ds.coords) and is_dimension_independent(ds.dims)
+
+
+def make_independent(ds: xr.Dataset) -> xr.Dataset:
+    """insures a dependant dataset is in the correct format."""
+    if is_independent(ds):
+        return ds
+    #  - rename the dims and coordinates
+    ds = ds.rename_dims(Dimensions.remap(ds.dims)).rename_vars(Coordinates.remap(ds.coords))
+    # - move any coordinates assigned as variables to the coordinates
+    ds = ds.set_coords(Coordinates.intersection(ds.variables))
+    ds = ds.rename_vars(Coordinates.remap(ds.coords))
+
+    ds[LON], ds[LAT] = (ds[coord].compute() for coord in (LON, LAT))
+
+    # - dimension assignment
+    if missing_dims := Dimensions.difference(ds.dims):
+        for dim in missing_dims:
+            ds = ds.expand_dims(dim, axis=[DIMENSIONS.index(dim)])
+
+    # # - coordinate assignment
+    if missing_coords := Coordinates.difference(ds.coords):
+        if missing_coords != {LVL}:
+            raise ValueError(f"missing coordinates {missing_coords}; only {LVL} is allowed to be missing!")
+        ds = ds.assign_coords(DERIVED_SURFACE_COORDINATE).set_xindex(LVL)
+
+    if ds[LAT].dims == (Y,) and ds[LON].dims == (X,):
+        # 5.2. Two-Dimensional Latitude, Longitude, Coordinate
+        # Variables
+        # The latitude and longitude coordinates of a horizontal grid that was not defined as a Cartesian
+        # product of latitude and longitude axes, can sometimes be represented using two-dimensional
+        # coordinate variables. These variables are identified as coordinates by use of the coordinates
+        # attribute
+        lon, lat = (ds[coord].to_numpy() for coord in (LON, LAT))
+        yy, xx = np.meshgrid(lat, lon, indexing="ij")
+
+        ds = ds.assign_coords({LAT: (LAT.axis, yy), LON: (LON.axis, xx)})
+
+    ds = ds.transpose(*DIMENSIONS)
+
+    return ds
+
+
+# =====================================================================================================================
+# - the dataset
+# =====================================================================================================================
+class IndependentDataset(xr.Dataset):
+    __slots__ = ()
+
+    @classmethod
+    def from_dependant(cls, ds: xr.Dataset, **kwargs) -> Self:
+        return cls(make_independent(ds), **kwargs)
+
+    # - dims
+    @property
+    def t(self) -> xr.DataArray:
+        return self[T]
+
+    @property
+    def z(self) -> xr.DataArray:
+        return self[Z]
+
+    @property
+    def y(self) -> xr.DataArray:
+        return self[Y]
+
+    @property
+    def x(self) -> xr.DataArray:
+        return self[X]
+
+    # - coords
+    @property
+    def time(self) -> xr.DataArray:
+        return self[TIME]
+
+    @property
+    def level(self) -> xr.DataArray:
+        return self[LVL]
+
+    @property
+    def lats(self) -> xr.DataArray:
+        return self[LAT]
+
+    @property
+    def lons(self) -> xr.DataArray:
+        return self[LON]
+
+    def select_from(self, x: Mapping[Coordinates, Sequence[Any]]) -> Self:
+        return self.sel({k: self[k].isin(v) for k, v in x.items()})
+
+
+class DependentDataset(IndependentDataset):
+    __slots__ = ("_grid_definition",)
+    __dims__ = (T, Z, Y, X)
+    __coords__ = (TIME, LVL, LAT, LON)
+    _grid_definition: GridDefinition | None
+
+    def __init__(
+        self,
+        data: xr.Dataset | Mapping[DependentVariables, xr.DataArray],
+        *,
+        attrs: Mapping[str, Any] | None = None,
+        depends: Depends | None = None,
+    ) -> None:
+        # TODO:
+        # - add method to create the dataset from a 4/5d array
+        if isinstance(data, DependentDataset) and attrs is None:
+            attrs = {
+                _GRID_DEFINITION_ATTRIBUTE: data.grid_definition,
+                _DEPENDS: data.depends,
+            }
+        elif attrs is None and depends is not None:
+            attrs = {_DEPENDS: Dependencies(depends)}
+
+        super().__init__(data, attrs=attrs)
+        self._grid_definition = None
+
+    @classmethod
+    def from_zarr(cls, store: Any, depends: Depends) -> DependentDataset:
+        depends = Dependencies(depends)
+        return cls.from_dependant(xr.open_zarr(store, drop_variables=depends.difference), depends=depends)
+
+    @property
+    def depends(self) -> Dependencies:
+        return self.attrs[_DEPENDS]
+
+    @property
+    def grid_definition(self) -> GridDefinition:
+        if self._grid_definition is None:
+            self._grid_definition = self.get_grid_definition()
+        return self._grid_definition
+
+    def set_grid_definition(self, nprocs: int = 1) -> DependentDataset:
+        self._grid_definition = self.get_grid_definition(nprocs=nprocs)
+        return self
+
+    def get_grid_definition(self, nprocs: int = 1) -> GridDefinition:
+        # TODO: need to write a test for this and insure
+        # the lons are in the range of -180 to 180
+        lons, lats = (self[x].to_numpy() for x in (LON, LAT))
+        lons = (lons + 180.0) % 360 - 180.0
+        return GridDefinition(lons, lats, nprocs=nprocs)
+
+    def _repr_html_(self) -> str:
+        obj_type = f"{self.__class__.__name__}[{self.depends.dataset_name}]"
+        import html
+
+        header_components = [f"<div class='xr-obj-type'>{html.escape(obj_type)}</div>"]
+
+        sections = [
+            xarray.core.formatting_html.dim_section(self),
+            xarray.core.formatting_html.coord_section(self.coords),
+            xarray.core.formatting_html.datavar_section(self.data_vars),
+        ]
+
+        return xarray.core.formatting_html._obj_repr(self, header_components, sections)
 
 
 # =====================================================================================================================
 #
 # =====================================================================================================================
-class DataProducer(DataWorker[PointOverTime, Array[[N, N, N, N, N], np.float_]], AbstractDomain):
+class DataProducer(DataWorker[PointOverTime, Array[[Nv, Nt, Nz, Ny, Nx], np.float_]], AbstractDomain):
     def __init__(self, indices: Iterable[PointOverTime], resampler: ReSampler) -> None:
         super().__init__(indices, resampler=resampler)
 
@@ -435,7 +462,7 @@ class DataProducer(DataWorker[PointOverTime, Array[[N, N, N, N, N], np.float_]],
         return self.attrs["resampler"]
 
     @property
-    def domain(self) -> DomainIntersection:
+    def domain(self) -> Domain:
         return self.sampler.domain
 
     def __getitem__(self, idx: PointOverTime) -> Array[[Nv, Nt, Nz, Ny, Nx], np.float_]:
@@ -445,7 +472,7 @@ class DataProducer(DataWorker[PointOverTime, Array[[N, N, N, N, N], np.float_]],
 
     def get_array(self, idx: PointOverTime, /) -> xr.DataArray:
         data = self[idx]
-        time, _ = idx
+        _, time = idx
 
         return xr.DataArray(
             data,
@@ -453,7 +480,7 @@ class DataProducer(DataWorker[PointOverTime, Array[[N, N, N, N, N], np.float_]],
             coords={
                 _VARIABLES: self.dvars[0],
                 LVL: (LVL.axis, self.levels),
-                TIME: (TIME.axis, self.slice_time(time)),
+                # TIME: (TIME.axis, self.slice_time(time)),
             },
         )
 
@@ -464,16 +491,10 @@ class DataProducer(DataWorker[PointOverTime, Array[[N, N, N, N, N], np.float_]],
 # =====================================================================================================================
 #  - functions
 # =====================================================================================================================
-def sequence(x: Iterable[_T]) -> DataSequence[_T]:
-    return DataSequence(x)
-
-
-def dataset_sequence(x: Iterable[DependentDataset]) -> DatasetSequence:
-    return DatasetSequence(x)
 
 
 def _open_datasets(
-    paths: ItemsType[str, Depends], *, levels: ListLike[Number] | None = None
+    paths: ItemsType[StrPath, Depends], *, levels: ListLike[Number] | None = None
 ) -> Iterable[DependentDataset]:
     for path, depends in items(paths):
         ds = DependentDataset.from_zarr(path, depends)
@@ -483,178 +504,6 @@ def _open_datasets(
 
 
 def open_datasets(
-    paths: ItemsType[str, Depends], *, levels: ListLike[Number] | None = None
+    paths: ItemsType[StrPath, Depends], *, levels: ListLike[Number] | None = None
 ) -> DataSequence[DependentDataset]:
-    return dataset_sequence(_open_datasets(paths, levels=levels))
-
-
-def create_resampler(
-    dsets: Iterable[DependentDataset],
-    dx: float = DEFAULT_DX,
-    dy: float | None = None,
-    start: int = DEFAULT_LEVEL_START,
-    stop: int = DEFAULT_LEVEL_STOP,
-    step: int = DEFAULT_LEVEL_STEP,
-    *,
-    p0: float = DEFAULT_PRESSURE_BASE,
-    p1: float = DEFAULT_PRESSURE_TOP,
-    rate: float = DEFAULT_SCALE_RATE,
-    levels: ListLike[Number] = DEFAULT_LEVELS,
-    height: int = DEFAULT_HEIGHT,
-    width: int = DEFAULT_WIDTH,
-    target_projection: LiteralCRS = DEFAULT_TARGET_PROJECTION,
-    method: str = DEFAULT_RESAMPLE_METHOD,
-) -> ReSampler:
-    return Mesoscale.arange(
-        dx=dx,
-        dy=dy,
-        start=start,
-        stop=stop,
-        step=step,
-        p0=p0,
-        p1=p1,
-        rate=rate,
-        levels=levels,
-    ).resample(*dsets, height=height, width=width, target_projection=target_projection, method=method)
-
-
-def data_producer(
-    dsets: Iterable[DependentDataset],
-    indices: Iterable[PointOverTime] | Callable[[DomainIntersection], Iterable[PointOverTime]] = LinearSampler,
-    *,
-    dx: float = DEFAULT_DX,
-    dy: float | None = None,
-    start: int = DEFAULT_LEVEL_START,
-    stop: int = DEFAULT_LEVEL_STOP,
-    step: int = DEFAULT_LEVEL_STEP,
-    p0: float = DEFAULT_PRESSURE_BASE,
-    p1: float = DEFAULT_PRESSURE_TOP,
-    rate: float = DEFAULT_SCALE_RATE,
-    levels: ListLike[Number] = DEFAULT_LEVELS,
-    height: int = DEFAULT_HEIGHT,
-    width: int = DEFAULT_WIDTH,
-    target_projection: LiteralCRS = DEFAULT_TARGET_PROJECTION,
-    method: str = DEFAULT_RESAMPLE_METHOD,
-    **sampler_kwargs: Any,
-) -> DataProducer:
-    scale = Mesoscale.arange(
-        dx=dx,
-        dy=dy,
-        start=start,
-        stop=stop,
-        step=step,
-        p0=p0,
-        p1=p1,
-        rate=rate,
-        levels=levels,
-    )
-    resampler = scale.resample(*dsets, height=height, width=width, target_projection=target_projection, method=method)
-    if callable(indices):
-        indices = indices(resampler.domain, **sampler_kwargs)
-
-    return DataProducer(indices, resampler=resampler)
-
-
-def data_generator(
-    paths: Iterable[tuple[str, Depends]],
-    indices: Iterable[PointOverTime] | Callable[[DomainIntersection], Iterable[PointOverTime]] = LinearSampler,
-    *,
-    dx: float = DEFAULT_DX,
-    dy: float | None = None,
-    start: int = DEFAULT_LEVEL_START,
-    stop: int = DEFAULT_LEVEL_STOP,
-    step: int = DEFAULT_LEVEL_STEP,
-    p0: float = DEFAULT_PRESSURE_BASE,
-    p1: float = DEFAULT_PRESSURE_TOP,
-    rate: float = 1,
-    levels: ListLike[Number] = DEFAULT_LEVELS,
-    height: int = DEFAULT_HEIGHT,
-    width: int = DEFAULT_WIDTH,
-    target_projection: LiteralCRS = DEFAULT_TARGET_PROJECTION,
-    method: str = DEFAULT_RESAMPLE_METHOD,
-    # - data consumer -
-    maxsize: int = 0,
-    timeout: float | None = None,
-    **sampler_kwargs: Any,
-) -> DataGenerator[Array[[N, N, N, N, N], np.float_]]:
-    datasets = open_datasets(paths, levels=levels)
-    producer = data_producer(
-        datasets,
-        indices,
-        dx=dx,
-        dy=dy,
-        start=start,
-        stop=stop,
-        step=step,
-        p0=p0,
-        p1=p1,
-        rate=rate,
-        levels=levels,
-        height=height,
-        width=width,
-        target_projection=target_projection,
-        method=method,
-        **sampler_kwargs,
-    )
-    return DataGenerator(producer, maxsize=maxsize, timeout=timeout)
-
-
-def data_loader(
-    paths: Iterable[tuple[str, Depends]],
-    indices: Iterable[PointOverTime] | Callable[[DomainIntersection], Iterable[PointOverTime]] = LinearSampler,
-    *,
-    dx: float = DEFAULT_DX,
-    dy: float | None = None,
-    start: int = DEFAULT_LEVEL_START,
-    stop: int = DEFAULT_LEVEL_STOP,
-    step: int = DEFAULT_LEVEL_STEP,
-    p0: float = DEFAULT_PRESSURE_BASE,
-    p1: float = DEFAULT_PRESSURE_TOP,
-    rate: float = 1,
-    levels: ListLike[Number] = DEFAULT_LEVELS,
-    height: int = 80,
-    width: int = 80,
-    target_projection: LiteralCRS = "lambert_azimuthal_equal_area",
-    method: str = "nearest",
-    # - data consumer -
-    maxsize: int = 0,
-    timeout: float | None = None,
-    # - data loader -
-    batch_size: int | None = 1,
-    shuffle: bool | None = None,
-    num_workers: int = 0,
-    pin_memory: bool = False,
-    drop_last: bool = False,
-    **sampler_kwargs: Any,
-) -> Iterable[Array[[N, N, N, N, N, N], np.float_]]:
-    if not _compat._has_torch:
-        raise RuntimeError("torch is not installed!")
-    dataset = data_generator(
-        paths,
-        indices,
-        dx=dx,
-        dy=dy,
-        start=start,
-        stop=stop,
-        step=step,
-        p0=p0,
-        p1=p1,
-        rate=rate,
-        levels=levels,
-        height=height,
-        width=width,
-        target_projection=target_projection,
-        method=method,
-        maxsize=maxsize,
-        timeout=timeout,
-        **sampler_kwargs,
-    )
-    return _compat.DataLoader(
-        dataset,
-        batch_size=batch_size,
-        timeout=timeout or 0,
-        shuffle=shuffle,
-        num_workers=num_workers,
-        drop_last=drop_last,
-        pin_memory=pin_memory,
-    )
+    return DatasetSequence(_open_datasets(paths, levels=levels))

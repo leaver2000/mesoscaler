@@ -20,17 +20,17 @@ from .._typing import (
 )
 from ..enums import TimeFrequency, TimeFrequencyLike
 from ..utils import repr_
-from .intersection import DomainIntersection, DomainIntersectionSampler
+from .domain import Domain, DomainIntersectionSampler
 
 
 class TimeAndPointSampler(DomainIntersectionSampler[PointOverTime], abc.ABC):
     _indices: list[PointOverTime] | None
 
     @property
-    def domain(self) -> DomainIntersection:
+    def domain(self) -> Domain:
         return self._domain
 
-    def __init__(self, domain: DomainIntersection) -> None:
+    def __init__(self, domain: Domain) -> None:
         super().__init__(domain)
         self._indices = None
 
@@ -87,7 +87,7 @@ class TimeAndPointSampler(DomainIntersectionSampler[PointOverTime], abc.ABC):
 class TimeSampler(TimeAndPointSampler):
     def __init__(
         self,
-        domain: DomainIntersection,
+        domain: Domain,
         /,
         *,
         time_frequency: TimeFrequencyLike = TimeFrequency("hour"),
@@ -120,7 +120,7 @@ class TimeSampler(TimeAndPointSampler):
 class LinearSampler(TimeSampler):
     def __init__(
         self,
-        domain: DomainIntersection,
+        domain: Domain,
         /,
         *,
         lon_lat_frequency: int = 100,
@@ -143,7 +143,7 @@ class AreaOfInterestSampler(TimeSampler):
 
     def __init__(
         self,
-        domain: DomainIntersection,
+        domain: Domain,
         /,
         *,
         lon_lat_frequency: int = 5,
