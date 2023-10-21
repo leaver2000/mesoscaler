@@ -17,14 +17,13 @@ from .enums import (
     Z,
     unpack_coords,
     unpack_dims,
+    auto_field,
 )
 from .generic import DataGenerator
 from .sampling.domain import DatasetSequence, Domain
 from .sampling.resampler import ReSampler
 from .sampling.sampler import AreaOfInterestSampler, LinearSampler
 
-# time, vertical, latitude, longitude = unpack_coords()
-# T, Z, X, Y = unpack_dims()
 __all__ = [
     # - core -
     "Mesoscale",
@@ -59,6 +58,7 @@ __all__ = [
     "URMA",
     "unpack_coords",
     "unpack_dims",
+    "auto_field",
     # - utils -
     "utils",
     # - create -
