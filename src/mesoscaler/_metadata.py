@@ -289,6 +289,22 @@ class _EnumMetaCls(enum.EnumMeta):
     def remap(cls, item: Iterable[HashableT], /):
         return {x: cls(x) for x in item}
 
+    def add_alias(cls, col: str, alias: list[str]) -> None:
+        df = cls._aliases
+        if col not in df.columns:
+            raise ValueError(f"Column {col} not in aliases")
+
+        mask = df.stack(dropna=False).isin(alias).unstack().fillna(False).any(axis=0)
+        if df.columns[mask].size > 1:  # type: ignore
+            raise ValueError(f"Alias {alias} already in use")
+
+        x = list(set(df[col].dropna()).union(alias))
+        if len(x) >= df.index.size:
+            for i in range(len(x) - df.index.size):
+                cls._aliases.loc[len(x) - i, :] = None
+
+        cls._aliases.loc[:, col] = x
+
 
 class VariableEnum(enum.Enum, metaclass=_EnumMetaCls):
     @property

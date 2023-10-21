@@ -228,11 +228,6 @@ class Mesoscale(Data[Array[[...], np.float_]]):
         return self._units
 
     @property
-    def area_extent(self) -> Array[[N, N4], np.float_]:
-        xy = np.c_[self.dx, self.dy]
-        return np.c_[-xy, xy]
-
-    @property
     def data(self) -> Iterable[tuple[str, Array[[...], np.float_]]]:
         yield from (
             ("scale", self.scale),
@@ -240,7 +235,17 @@ class Mesoscale(Data[Array[[...], np.float_]]):
             ("area_extent", self.area_extent),
         )  # type: ignore
 
-    # def __repr__(self) -> str:
+    @property
+    def area_extent(self) -> Array[[N, N4], np.float_]:
+        xy = np.c_[self.dx, self.dy]
+        return np.c_[-xy, xy]
+
+    def __array__(self) -> Array[[N, N4], np.float_]:
+        return self.area_extent
+
+    def to_numpy(self, *, units: Unit = "km") -> Array[[N, N4], np.float_]:
+        return self.area_extent * _units[units]
+
     def __repr__(self) -> str:
         name = self.name
         size = self.size
@@ -252,15 +257,8 @@ class Mesoscale(Data[Array[[...], np.float_]]):
             (f"extent[{xy}]", self.area_extent),
         )
 
-    def __array__(self) -> Array[[N, N2], np.float_]:
-        return self.to_numpy()
-
     def __len__(self) -> int:
         return len(self.levels)
-
-    def to_numpy(self, *, units: Unit = "km") -> Array[[N, N2], np.float_]:
-        xy = np.c_[self.dx, self.dy] * _units[units]
-        return np.c_[-xy, xy]
 
     def get_domain(self, dsets: Iterable[DependentDataset]) -> Domain:
         return Domain(dsets, self)

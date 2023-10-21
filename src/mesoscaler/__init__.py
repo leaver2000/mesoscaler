@@ -1,5 +1,5 @@
 from . import create, utils
-from .core import (  # create_coordinates,; create_data_array,; create_dataset,; create_dataset_sequence,; create_generator,; create_loader,; create_producer,; create_resampler,; dataset_sequence,; sequence,
+from .core import (
     DataProducer,
     DependentDataset,
     Mesoscale,
@@ -7,18 +7,10 @@ from .core import (  # create_coordinates,; create_data_array,; create_dataset,;
 )
 from .enums import (
     ERA5,
-    LAT,
-    LON,
-    LVL,
-    TIME,
     URMA,
     Coordinates,
     DependentVariables,
     Dimensions,
-    T,
-    X,
-    Y,
-    Z,
     unpack_coords,
     unpack_dims,
 )
@@ -27,6 +19,8 @@ from .sampling.domain import DatasetSequence, Domain
 from .sampling.resampler import ReSampler
 from .sampling.sampler import AreaOfInterestSampler, LinearSampler
 
+time, vertical, latitude, longitude = unpack_coords()
+T, Z, X, Y = unpack_dims()
 __all__ = [
     # - core -
     "Mesoscale",
@@ -49,17 +43,11 @@ __all__ = [
     "Coordinates",
     "Dimensions",
     "URMA",
-    "LVL",
-    "TIME",
     "X",
     "Y",
     "Z",
     "T",
     "ERA5",
-    "TIME",
-    "LVL",
-    "LAT",
-    "LON",
     "unpack_coords",
     "unpack_dims",
     # - utils -

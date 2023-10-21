@@ -50,8 +50,8 @@ DimensionsMapType: TypeAlias = Mapping[tuple[Literal[X], Literal[Y]] | Literal[Z
 class Coordinates(IndependentVariables):
     time = auto_field(axis=(T,))
     vertical = auto_field(aliases=["level", "height"], axis=(Z,))
-    latitude = auto_field(aliases=["grid_latitude", "lat"], axis=(Y, X))
-    longitude = auto_field(aliases=["grid_longitude", "lon"], axis=(Y, X))
+    latitude = auto_field(aliases=["grid_latitude", "lat", "y", "Y"], axis=(Y, X))
+    longitude = auto_field(aliases=["grid_longitude", "lon", "x", "X"], axis=(Y, X))
 
     @property
     def axis(self) -> tuple[Dimensions, ...]:
@@ -76,6 +76,24 @@ def unpack_coords() -> (
 
 
 COORDINATES = TIME, LVL, LAT, LON = unpack_coords()
+
+
+def add_alias(col: str, alias: list[str]):
+    df = Coordinates._aliases
+    if col not in df.columns:
+        raise ValueError(f"Column {col} not in aliases")
+    mask = df.stack(dropna=False).isin(alias).unstack().fillna(False).any(axis=0)
+    # print(mask)
+    if df.columns[mask].size > 1:  # type: ignore
+        raise ValueError(f"Alias {alias} already in use")
+
+    x = list(set(df[col].dropna()).union(alias))
+    if len(x) >= df.index.size:
+        for i in range(len(x) - df.index.size):
+            Coordinates._aliases.loc[len(x) - i, :] = None
+
+    Coordinates._aliases.loc[:, col] = x
+    return x
 
 
 # =====================================================================================================================
