@@ -13,8 +13,6 @@ import pyproj
 
 from ._typing import (
     Any,
-    AnyArrayLike,
-    Callable,
     Generic,
     Hashable,
     HashableT,
@@ -22,11 +20,8 @@ from ._typing import (
     Mapping,
     MutableMapping,
     NamedTuple,
-    NumpyDType_T,
-    PandasDType_T,
     TypeAlias,
     TypeVar,
-    overload,
 )
 
 _ENUM_DICT_RESERVED_KEYS = (
@@ -141,7 +136,7 @@ def _repack_info(
         {
             "name": name,
             CLASS_METADATA: class_metadata,
-            CLASS_LOC: _Loc(list, member_series),
+            CLASS_LOC: _Loc(member_series),
             MEMBER_METADATA: member_metadata,
             MEMBER_ALIASES: aliases,
             MEMBER_SERIES: member_series,
@@ -152,32 +147,16 @@ def _repack_info(
 # =====================================================================================================================
 #
 # =====================================================================================================================
-_AnyArrayLikeT = TypeVar("_AnyArrayLikeT", bound=AnyArrayLike)
-
-
 # TODO: this need work
-class _Loc(Generic[_AnyArrayLikeT]):
-    def __init__(
-        self,
-        hook: Callable[[AnyArrayLike[NumpyDType_T, PandasDType_T]], _AnyArrayLikeT],
-        data: AnyArrayLike[NumpyDType_T, PandasDType_T],
-    ) -> None:
-        self._hook = hook
+class _Loc(Generic[_T]):
+    def __init__(self, data: pd.Series[_T]) -> None:
         self._data = data
 
-    @overload
-    def __getitem__(self, item: list) -> PandasDType_T | NumpyDType_T:  # pyright: ignore
-        ...
-
-    @overload
-    def __getitem__(self, item: Any) -> _AnyArrayLikeT:
-        ...
-
-    def __getitem__(self, item: Any) -> _AnyArrayLikeT | PandasDType_T | NumpyDType_T:  # type: ignore
+    def __getitem__(self, item: Any) -> _T | list[_T]:
         from .utils import is_array_like
 
         x = self._data[item]
-        return self._hook(x) if is_array_like(x) else x
+        return list(x) if is_array_like(x) else x  # type: ignore
 
 
 class _MetaDataDescriptor:

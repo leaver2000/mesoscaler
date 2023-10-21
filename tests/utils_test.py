@@ -1,7 +1,7 @@
 import itertools
 
-import pytest
 import numpy as np
+import pytest
 
 import src.mesoscaler.utils as utils
 

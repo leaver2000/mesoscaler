@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-import os
 import datetime
-import xarray as xr
+import os
+
 import numpy as np
 import pytest
-
+import xarray as xr
 
 import src.mesoscaler as mesoscaler
 

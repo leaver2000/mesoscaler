@@ -12,7 +12,6 @@ from pyresample.geometry import GridDefinition
 from xarray.core.coordinates import DatasetCoordinates
 
 from ._typing import (
-    N2,
     N4,
     Any,
     Array,
