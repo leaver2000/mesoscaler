@@ -10,6 +10,8 @@ from ._typing import Any, Array, Literal, N, TypeAlias, overload
 _auto_frequency = lambda x: auto_field(x, aliases=[f"datetime64[{x}]", f"timedelta64[{x}]"])
 Falsy: TypeAlias = Literal[False, 0] | None
 Truthy: TypeAlias = Literal[True, 1]
+DateTimeLike: TypeAlias = datetime.datetime | np.datetime64 | str
+TimeDeltaLike: TypeAlias = datetime.timedelta | np.timedelta64 | int
 
 
 class Temporal(str, VariableEnum):
@@ -31,31 +33,23 @@ class Temporal(str, VariableEnum):
 
     @overload
     def arange(
-        self,
-        start: datetime.datetime | np.datetime64 | str,
-        stop: datetime.datetime | np.datetime64 | str | None = None,
-        step: datetime.timedelta | np.timedelta64 | int | None = None,
+        self, start: DateTimeLike, stop: DateTimeLike, step: TimeDeltaLike | None = None
     ) -> Array[[N], np.datetime64]:
         ...
 
     @overload
     def arange(
-        self,
-        start: np.timedelta64 | datetime.timedelta | int,
-        stop: np.timedelta64 | datetime.timedelta | int | None = None,
-        step: datetime.timedelta | np.timedelta64 | int | None = None,
+        self, start: TimeDeltaLike, stop: TimeDeltaLike, step: TimeDeltaLike | None = None
     ) -> Array[[N], np.timedelta64]:
         ...
 
     def arange(
         self,
-        start: datetime.datetime | np.datetime64 | str | np.timedelta64 | datetime.timedelta | int,
-        stop: datetime.datetime | np.datetime64 | str | np.timedelta64 | datetime.timedelta | int | None = None,
-        step: datetime.timedelta | np.timedelta64 | int | None = None,
+        start: DateTimeLike | TimeDeltaLike,
+        stop: DateTimeLike | TimeDeltaLike,
+        step: TimeDeltaLike | None = None,
     ) -> Array[[N], np.datetime64 | np.timedelta64]:
-        # dtype = "dt" if isinstance(start, (datetime.datetime, np.datetime64, str)) else "td"
-        x = isinstance(start, (datetime.datetime, np.datetime64, str))
-        dtype = self.get_dtype(x)
+        dtype = self.get_dtype(isinstance(start, (datetime.datetime, np.datetime64, str)))
 
         return np.arange(start, stop, step, dtype=dtype)
 
