@@ -82,14 +82,14 @@ class Time64(str, VariableEnum):
         raise ValueError(f"Invalid value for {cls.__class__.__name__}: {value!r}")
 
     @overload
-    def get_dtype(self, x: DateTimeValue, /) -> np.dtype[np.datetime64]:
+    def infer_dtype(self, x: DateTimeValue, /) -> np.dtype[np.datetime64]:
         ...
 
     @overload
-    def get_dtype(self, x: TimeDeltaValue, /) -> np.dtype[np.timedelta64]:
+    def infer_dtype(self, x: TimeDeltaValue, /) -> np.dtype[np.timedelta64]:
         ...
 
-    def get_dtype(self, x: DateTimeValue | TimeDeltaValue, /) -> np.dtype[np.datetime64 | np.timedelta64]:
+    def infer_dtype(self, x: DateTimeValue | TimeDeltaValue, /) -> np.dtype[np.datetime64 | np.timedelta64]:
         """
         Returns the NumPy dtype for the given input value.
 
@@ -119,7 +119,7 @@ class Time64(str, VariableEnum):
         stop: DateTimeValue | TimeDeltaValue,
         step: TimeDeltaValue | None = None,
     ) -> Array[[N], np.datetime64 | np.timedelta64]:
-        dtype = self.get_dtype(start)
+        dtype = self.infer_dtype(start)
 
         return np.arange(start, stop, step, dtype=dtype)
 
@@ -148,10 +148,10 @@ class Time64(str, VariableEnum):
     ) -> np.datetime64:
         ...
 
-    def datetime(self, year: int | datetime.datetime | np.datetime64 | str | None = None, *args: Any) -> np.datetime64:
-        if args and isinstance(year, int):
-            year = datetime.datetime(year, *args)
-        return np.datetime64(year, self)
+    def datetime(self, __x: int | datetime.datetime | np.datetime64 | str | None = None, *args: Any) -> np.datetime64:
+        if args and isinstance(__x, int):
+            __x = datetime.datetime(__x, *args)
+        return np.datetime64(__x, self)
 
 
 years, months, days, hours, minutes, seconds, milliseconds, microseconds, nanoseconds = (

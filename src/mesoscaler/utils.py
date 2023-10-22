@@ -177,6 +177,7 @@ def area_definition(
 # =====================================================================================================================
 # - time utils
 # =====================================================================================================================
+# TODO: move this to time64
 def slice_time(t: Array[[...], np.datetime64], s: TimeSlice, /) -> Array[[N], np.datetime64]:
     if s.start is None or s.stop is None or s.step is not None:
         raise ValueError(f"invalid slice: {s}")
