@@ -1,7 +1,6 @@
 import enum
 import types
 
-import numpy as np
 import pandas as pd
 import pyproj
 
@@ -14,19 +13,16 @@ from ._typing import (
     Iterable,
     MutableMapping,
     Self,
-    TypeAlias,
     TypeVar,
     overload,
 )
 
 _T = TypeVar("_T")
-_Item: TypeAlias = np.generic | bool | int | float | complex | str | bytes | memoryview | enum.Enum | Hashable
-
-LOC: str = ...
-CLASS_METADATA: str = ...
-MEMBER_METADATA: str = ...
-MEMBER_ALIASES: str = ...
-MEMBER_SERIES: str = ...
+_CLASS_LOC = "__metadata_loc__"
+_CLASS_METADATA = "__metadata_cls_data__"
+_MEMBER_METADATA = "__metadata_member_data__"
+_MEMBER_ALIASES = "__metadata_member_aliases__"
+_MEMBER_SERIES = "__metadata_series__"
 
 class _EnumMetaCls(Generic[_T], enum.EnumMeta):
     __metadata__: ClassVar[MutableMapping[str, Any]]
@@ -69,7 +65,7 @@ class VariableEnum(enum.Enum, metaclass=_EnumMetaCls):
     @classmethod
     def intersection(cls, item: Hashable | Iterable[Hashable], /) -> set[Self]: ...
     @classmethod
-    def add_alias(cls, member: Self, alias: list[Hashable], /) -> None: ...
+    def add_alias(cls, name: str, alias: list[Hashable], /, *, sort: bool = False) -> None: ...
     @classmethod
     def remap(cls, item: Iterable[HashableT], /) -> dict[HashableT, Self]: ...
     # - methods[transfer]

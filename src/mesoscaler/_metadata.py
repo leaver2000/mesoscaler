@@ -35,11 +35,11 @@ _ENUM_DICT_RESERVED_KEYS = (
     "_ignore_",
 )
 
-CLASS_LOC = "__mesometa_loc__"
-CLASS_METADATA = "__mesometa_cls_data__"
-MEMBER_METADATA = "__mesometa_member_data__"
-MEMBER_ALIASES = "__mesometa_member_aliases__"
-MEMBER_SERIES = "__mesometa_series__"
+_CLASS_LOC = "__metadata_loc__"
+_CLASS_METADATA = "__metadata_cls_data__"
+_MEMBER_METADATA = "__metadata_member_data__"
+_MEMBER_ALIASES = "__metadata_member_aliases__"
+_MEMBER_SERIES = "__metadata_series__"
 
 _T = TypeVar("_T")
 _Item: TypeAlias = np.generic | bool | int | float | complex | str | bytes | memoryview | enum.Enum | Hashable
@@ -66,12 +66,12 @@ def auto_field(value: _T | Any = None, *, aliases: list[_T] | None = None, **met
 
     if value is None:
         value = enum.auto()
-    if MEMBER_ALIASES in metadata and aliases is None:
-        assert isinstance(metadata[MEMBER_ALIASES], list)
-    elif MEMBER_ALIASES in metadata and aliases is not None:
+    if _MEMBER_ALIASES in metadata and aliases is None:
+        assert isinstance(metadata[_MEMBER_ALIASES], list)
+    elif _MEMBER_ALIASES in metadata and aliases is not None:
         raise ValueError("Field metadata contains aliases and aliases were passed as an argument.")
     else:
-        metadata[MEMBER_ALIASES] = aliases or []
+        metadata[_MEMBER_ALIASES] = aliases or []
 
     return _Field(value, metadata)
 
@@ -82,10 +82,10 @@ def get_metadata() -> list[dict[str, Any]]:
     return [
         {
             "hash": key,
-            CLASS_METADATA: dict(value[CLASS_METADATA]),
-            MEMBER_SERIES: dict(value[MEMBER_SERIES]),
-            MEMBER_METADATA: dict(value[MEMBER_METADATA]),
-            MEMBER_ALIASES: value[MEMBER_ALIASES].to_dict(orient="records"),
+            _CLASS_METADATA: dict(value[_CLASS_METADATA]),
+            _MEMBER_SERIES: dict(value[_MEMBER_SERIES]),
+            _MEMBER_METADATA: dict(value[_MEMBER_METADATA]),
+            _MEMBER_ALIASES: value[_MEMBER_ALIASES].to_dict(orient="records"),
         }
         for key, value in items
     ]
@@ -122,7 +122,7 @@ def _repack_info(
 ) -> types.MappingProxyType[str, Any]:
     index = pd.Index(list(member_map.keys()), name="member_names", dtype="string[pyarrow]")  # type: pd.Index[str]
     aliases = pd.DataFrame.from_dict(
-        {name: list(set(metadata[name].pop(MEMBER_ALIASES, []))) for name in index}, orient="index"
+        {name: list(dict.fromkeys(metadata[name].pop(_MEMBER_ALIASES, []))) for name in index}, orient="index"
     ).T
 
     member_metadata = types.MappingProxyType(collections.defaultdict(dict, metadata))
@@ -135,11 +135,11 @@ def _repack_info(
     return types.MappingProxyType(
         {
             "name": name,
-            CLASS_METADATA: class_metadata,
-            CLASS_LOC: _Loc(member_series),
-            MEMBER_METADATA: member_metadata,
-            MEMBER_ALIASES: aliases,
-            MEMBER_SERIES: member_series,
+            _CLASS_METADATA: class_metadata,
+            _CLASS_LOC: _Loc(member_series),
+            _MEMBER_METADATA: member_metadata,
+            _MEMBER_ALIASES: aliases,
+            _MEMBER_SERIES: member_series,
         }
     )
 
@@ -147,16 +147,17 @@ def _repack_info(
 # =====================================================================================================================
 #
 # =====================================================================================================================
-# TODO: this need work
+class AliasConflictError(ValueError):
+    ...
+
+
 class _Loc(Generic[_T]):
-    def __init__(self, data: pd.Series[_T]) -> None:
-        self._data = data
+    def __init__(self, data: pd.Series[_T]) -> None:  # type: ignore
+        self._s = data
 
-    def __getitem__(self, item: Any) -> _T | list[_T]:
-        from .utils import is_array_like
-
-        x = self._data[item]
-        return list(x) if is_array_like(x) else x  # type: ignore
+    def __getitem__(self, item: str | list[str]) -> _T | Any | list[_T]:
+        x = self._s[item]
+        return x.to_list() if isinstance(x, pd.Series) else x
 
 
 class _MetaDataDescriptor:
@@ -183,7 +184,13 @@ class _MetaDataDescriptor:
 class _EnumMetaCls(enum.EnumMeta):
     __metadata__ = _MetaDataDescriptor()
 
-    def __new__(cls, name: str, bases: tuple[Any, ...], cls_dict: enum._EnumDict, **kwargs: Any) -> _EnumMetaCls:
+    def __new__(
+        cls,
+        name: str,
+        bases: tuple[Any, ...],
+        cls_dict: enum._EnumDict,
+        **kwargs: Any,
+    ) -> _EnumMetaCls:
         cls_dict, member_metadata = _unpack_info(cls_dict)
         obj = super().__new__(cls, name, bases, cls_dict)
         if obj._member_names_:
@@ -199,15 +206,15 @@ class _EnumMetaCls(enum.EnumMeta):
     # =================================================================================================================
     @property
     def metadata(cls) -> MutableMapping[str, Any]:
-        return cls.__metadata__[CLASS_METADATA]
+        return cls.__metadata__[_CLASS_METADATA]
 
     @property
     def loc(cls) -> _Loc[list[VariableEnum]]:
-        return cls.__metadata__[CLASS_LOC]
+        return cls.__metadata__[_CLASS_LOC]
 
     @property
     def _series(cls) -> pd.Series[Any]:
-        return cls.__metadata__[MEMBER_SERIES]
+        return cls.__metadata__[_MEMBER_SERIES]
 
     @property
     def _names(cls) -> pd.Index[str]:
@@ -215,11 +222,11 @@ class _EnumMetaCls(enum.EnumMeta):
 
     @property
     def _member_metadata(cls) -> types.MappingProxyType[str, MemberMetadata]:
-        return cls.__metadata__[MEMBER_METADATA]
+        return cls.__metadata__[_MEMBER_METADATA]
 
     @property
     def _aliases(cls) -> pd.DataFrame:
-        return cls.__metadata__[MEMBER_ALIASES]
+        return cls.__metadata__[_MEMBER_ALIASES]
 
     # =================================================================================================================
     # - metadata properties
@@ -268,16 +275,21 @@ class _EnumMetaCls(enum.EnumMeta):
     def remap(cls, item: Iterable[HashableT], /):
         return {x: cls(x) for x in item}
 
-    def add_alias(cls, col: str, alias: list[str]) -> None:
+    def add_alias(cls, col: str, alias: list[str], /, *, sort: bool = False) -> None:
         df = cls._aliases
+
         if col not in df.columns:
             raise ValueError(f"Column {col} not in aliases")
 
         mask = df.stack(dropna=False).isin(alias).unstack().fillna(False).any(axis=0)
-        if df.columns[mask].size > 1:  # type: ignore
-            raise ValueError(f"Alias {alias} already in use")
+        assert isinstance(mask, pd.Series)
+        if df.columns[mask].size > 1:
+            raise AliasConflictError(f"Alias {alias} already in use")
 
-        x = list(set(df[col].dropna()).union(alias))
+        x = list(dict.fromkeys(df[col].to_list() + alias))
+        if sort:
+            x.sort()
+
         if len(x) >= df.index.size:
             for i in range(len(x) - df.index.size):
                 cls._aliases.loc[len(x) - i, :] = None
@@ -293,9 +305,6 @@ class VariableEnum(enum.Enum, metaclass=_EnumMetaCls):
     @property
     def metadata(self) -> MemberMetadata:
         return self.__class__._member_metadata[self.name]
-
-    def add_aliases(self, *aliases: Any) -> None:
-        self.__class__._aliases[self.name].extend(aliases)
 
 
 class IndependentVariables(str, VariableEnum):

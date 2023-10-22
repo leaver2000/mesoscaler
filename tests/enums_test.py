@@ -3,8 +3,8 @@ import pandas as pd
 import pytest
 
 from src.mesoscaler._metadata import (
-    CLASS_METADATA,
-    MEMBER_METADATA,
+    _CLASS_METADATA,
+    _MEMBER_METADATA,
     VariableEnum,
     auto_field,
 )
@@ -74,18 +74,36 @@ def test_my_enum_metadata() -> None:
 
 
 def test_my_enum_class_metadata() -> None:
-    class_meta = MyEnum.__metadata__[CLASS_METADATA]
+    class_meta = MyEnum.__metadata__[_CLASS_METADATA]
     assert class_meta is MyEnum.metadata
 
 
 def test_member_metadata() -> None:
     member_meta = MyEnum.A.metadata
-    assert member_meta is MyEnum.__metadata__[MEMBER_METADATA]["A"]
+    assert member_meta is MyEnum.__metadata__[_MEMBER_METADATA]["A"]
 
     mm = MyEnum._member_metadata
-    assert MyEnum.__metadata__[MEMBER_METADATA] is mm
+    assert MyEnum.__metadata__[_MEMBER_METADATA] is mm
+
+
+def test_datetime():
+    assert (
+        TimeFrequency.hour.datetime(2023, 1, 1)
+        == TimeFrequency("h").datetime(2023, 1, 1)
+        == TimeFrequency("hour").datetime(2023, 1, 1)
+        == TimeFrequency("datetime64[h]").datetime(2023, 1, 1)
+        == TimeFrequency.hour.datetime("2023-01-01")
+        == TimeFrequency.hour.datetime(TimeFrequency.hour.datetime("2023-01-01"))
+        == np.datetime64("2023-01-01", "h")
+    )
+    assert TimeFrequency.hour.datetime(2023, 1, 1).astype(str) == "2023-01-01T00"
+
+    # assert TimeFrequency.hour.datetime(2023, 1, 1).dtype == TimeFrequency.hour.dt.dtype
+    print(TimeFrequency.hour.dt.dtype)
+    print(TimeFrequency.hour.aliases)
 
 
 def test_timedelta() -> None:
     for x in TimeFrequency:
-        assert isinstance(x.timedelta(1), np.timedelta64)
+        td = x.timedelta(1)
+        assert isinstance(td, np.timedelta64)

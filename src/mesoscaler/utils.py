@@ -46,9 +46,9 @@ from ._typing import (
     AreaExtent,
     Array,
     Callable,
+    CanBeItems,
     GenericAliasType,
     Hashable,
-    ItemsType,
     Iterable,
     Iterator,
     ListLike,
@@ -71,7 +71,12 @@ from ._typing import (
     TypeVar,
     overload,
 )
-from .enums import LiteralNoDefault, NoDefault, TimeFrequency, TimeFrequencyLike
+from .enums import TimeFrequency, TimeFrequencyLike
+
+__NoDefault = enum.Enum("", "NoDefault")
+NoDefault = __NoDefault.NoDefault
+LiteralNoDefault = Literal[__NoDefault.NoDefault]
+del __NoDefault
 
 _T1 = TypeVar("_T1", bound=Any)
 _T2 = TypeVar("_T2")
@@ -411,9 +416,9 @@ def join_kv(
     if isinstance(head, tuple):
         args = (head, *args)
         head = ""
-
     elif isinstance(head, type):
         head = f"{head.__name__}:"
+
     if start is not NoDefault and stop is not NoDefault:
         text = sep.join(_repr_generator(*((str(k), v) for k, v in args[start:stop])))
         text += "\n...\n"
@@ -438,24 +443,14 @@ def sort_unique(__x: ListLike[Number_T], /, *, descending=False) -> list[Number_
 
 
 def sort_unique(
-    __x: ListLike[Number_T] | Sequence[Number_T] | Array[[...], NumpyNumber_T],
+    __x: Iterable[Number_T] | Array[[...], NumpyNumber_T],
     /,
     *,
     descending=False,
     axis: int | None = None,
 ) -> list[Number_T] | Array[[...], NumpyNumber_T]:
     x = (
-        np.sort(
-            np.unique(
-                __x,
-                return_index=False,
-                return_inverse=False,
-                return_counts=False,
-                axis=axis,
-            )
-        )
-        if isinstance(__x, np.ndarray)
-        else sorted(set(__x))
+        np.sort(np.unique(__x, axis=axis)) if isinstance(__x, np.ndarray) else sorted(set(__x))
     )  # type: list[Number_T] | Array[[...], NumpyNumber_T]
 
     if descending:
@@ -559,16 +554,23 @@ def iter_pair(x: Pair[Any] | Iterable[Pair[Any]]) -> Iterator[Pair[Any]]:
 
 
 @overload
-def items(x: ItemsType[_T1, _T2], /, *args: tuple[_T1, _T2]) -> itertools.chain[tuple[_T1, _T2]]:
-    ...
-
-
-@overload
 def items(x: tuple[_T1, _T2], /, *args: tuple[_T1, _T2]) -> itertools.chain[tuple[_T1, _T2]]:
     ...
 
 
-def items(x: ItemsType[_T1, _T2] | tuple[_T1, _T2], /, *args: tuple[_T1, _T2]) -> itertools.chain[tuple[_T1, _T2]]:
+@overload
+def items(x: CanBeItems[_T1, _T2], /, *args: tuple[_T1, _T2]) -> itertools.chain[tuple[_T1, _T2]]:
+    ...
+
+
+@overload
+def items(x: CanBeItems[str, _T2], /, *args: tuple[str, _T2], **kwargs: _T2) -> itertools.chain[tuple[str, _T2]]:
+    ...
+
+
+def items(
+    x: tuple[_T1 | str, _T2] | CanBeItems[_T1 | str, _T2], /, *args: tuple[_T1 | str, _T2], **kwargs: _T2
+) -> itertools.chain[tuple[_T1, _T2]] | itertools.chain[tuple[str, _T2]]:
     """
     >>> assert (
         list(utils.items({"a": 1, "b": 2}))
@@ -581,7 +583,7 @@ def items(x: ItemsType[_T1, _T2] | tuple[_T1, _T2], /, *args: tuple[_T1, _T2]) -
     if isinstance(x, tuple):
         x = iter_pair(x)
 
-    return itertools.chain((x.items() if isinstance(x, Mapping) else x), args)
+    return itertools.chain((x.items() if isinstance(x, Mapping) else x), args, kwargs.items())
 
 
 # =====================================================================================================================

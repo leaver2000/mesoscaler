@@ -16,9 +16,9 @@ from ._typing import (
     Any,
     Array,
     ArrayLike,
+    CanBeItems,
     Final,
     Hashable,
-    ItemsType,
     Iterable,
     ListLike,
     Literal,
@@ -396,10 +396,7 @@ class DependentDataset(IndependentDataset):
         # TODO:
         # - add method to create the dataset from a 4/5d array
         if isinstance(data, DependentDataset) and attrs is None:
-            attrs = {
-                _GRID_DEFINITION_ATTRIBUTE: data.grid_definition,
-                _DEPENDS: data.depends,
-            }
+            attrs = {_DEPENDS: data.depends}
         elif attrs is None and depends is not None:
             attrs = {_DEPENDS: Dependencies(depends)}
 
@@ -491,7 +488,7 @@ class DataProducer(DataWorker[PointOverTime, Array[[Nv, Nt, Nz, Ny, Nx], np.floa
 
 
 def _open_datasets(
-    paths: ItemsType[StrPath, Depends], *, levels: ListLike[Number] | None = None
+    paths: CanBeItems[StrPath, Depends], *, levels: ListLike[Number] | None = None
 ) -> Iterable[DependentDataset]:
     for path, depends in items(paths):
         ds = DependentDataset.from_zarr(path, depends)
@@ -501,6 +498,6 @@ def _open_datasets(
 
 
 def open_datasets(
-    paths: ItemsType[StrPath, Depends], *, levels: ListLike[Number] | None = None
+    paths: CanBeItems[StrPath, Depends], *, levels: ListLike[Number] | None = None
 ) -> DataSequence[DependentDataset]:
     return DatasetSequence(_open_datasets(paths, levels=levels))

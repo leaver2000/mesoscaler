@@ -12,9 +12,9 @@ from ._typing import (
     Array,
     ArrayLike,
     Callable,
+    CanBeItems,
     Hashable,
     HashableT,
-    ItemsType,
     Iterable,
     ListLike,
     Mapping,
@@ -243,7 +243,7 @@ def producer(
 
 
 def generator(
-    paths: ItemsType[StrPath, Depends],
+    paths: CanBeItems[StrPath, Depends],
     indices: Iterable[PointOverTime] | Callable[[Domain], Iterable[PointOverTime]] = LinearSampler,
     *,
     dx: float = DEFAULT_DX,
@@ -287,7 +287,7 @@ def generator(
 
 
 def loader(
-    paths: ItemsType[StrPath, Depends],
+    paths: CanBeItems[StrPath, Depends],
     indices: Iterable[PointOverTime] | Callable[[Domain], Iterable[PointOverTime]] = LinearSampler,
     *,
     dx: float = DEFAULT_DX,

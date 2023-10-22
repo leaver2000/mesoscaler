@@ -12,12 +12,13 @@ from .enums import (
     Dimensions,
     IndependentVariables,
     T,
+    TimeFrequency,
     X,
     Y,
     Z,
+    auto_field,
     unpack_coords,
     unpack_dims,
-    auto_field,
 )
 from .generic import DataGenerator
 from .sampling.domain import DatasetSequence, Domain
@@ -59,6 +60,7 @@ __all__ = [
     "unpack_coords",
     "unpack_dims",
     "auto_field",
+    "TimeFrequency",
     # - utils -
     "utils",
     # - create -

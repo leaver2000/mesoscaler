@@ -52,7 +52,6 @@ __all__ = [
     "MutableMapping",
     "NamedTuple",
     "NumpyDType_T",
-    "PandasDType_T",
     "DependentDataset",
 ]
 import datetime
@@ -95,7 +94,6 @@ import numpy as np
 import pandas as pd
 import xarray as xr
 from numpy._typing._nested_sequence import _NestedSequence as NestedSequence
-from pandas._typing import Dtype
 
 if sys.version_info <= (3, 9):
     from typing_extensions import ParamSpec, Self, TypeAlias, TypeVarTuple, Unpack
@@ -139,27 +137,7 @@ NumpyGeneric_T = TypeVar("NumpyGeneric_T", bound=np.generic, covariant=True)
 NumpyDType_T = TypeVar("NumpyDType_T", bound=np.dtype[Any])
 NumpyNumber_T = TypeVar("NumpyNumber_T", bound=np.number[Any])
 
-Number_T = TypeVar("Number_T", bound="Number", covariant=True)
-PandasDType_T = TypeVar(
-    "PandasDType_T",
-    bound=Union[
-        Any,
-        str,
-        bytes,
-        datetime.date,
-        datetime.time,
-        bool,
-        int,
-        float,
-        complex,
-        Dtype,
-        datetime.datetime,  # includes pd.Timestamp
-        datetime.timedelta,  # includes pd.Timedelta
-        pd.Period,
-        "pd.Interval[int | float | pd.Timestamp | pd.Timedelta]",
-        pd.CategoricalDtype,
-    ],
-)
+Number_T = TypeVar("Number_T", bound="Number")
 
 
 NumberT = TypeVar("NumberT", bound="Number")
@@ -169,11 +147,10 @@ HashableT = TypeVar("HashableT", bound=Hashable)
 Pair: TypeAlias = tuple[_T, _T]
 DictStr: TypeAlias = dict[str, _T]
 DictStrAny: TypeAlias = DictStr[Any]
-
 StrPath: TypeAlias = "str | os.PathLike[str]"
 Method: TypeAlias = Callable[Concatenate[_T, _P], _T_co]
 ClassMethod: TypeAlias = Callable[Concatenate[type[_T], _P], _T_co]
-ItemsType: TypeAlias = Mapping[_T, _T_co] | Iterable[tuple[_T, _T_co]] | Sequence[tuple[_T, _T_co]]
+CanBeItems: TypeAlias = Mapping[_T, _T_co] | Iterable[tuple[_T, _T_co]]
 
 # - numpy
 Int: TypeAlias = int | np.integer[Any]

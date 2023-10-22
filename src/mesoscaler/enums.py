@@ -17,10 +17,6 @@ from ._metadata import (
 from ._typing import Any, Array, Literal, Mapping, N, TypeAlias, TypeVar, overload
 
 _T = TypeVar("_T")
-__NoDefault = enum.Enum("", "NoDefault")
-NoDefault = __NoDefault.NoDefault
-LiteralNoDefault = Literal[__NoDefault.NoDefault]
-del __NoDefault
 
 
 # =====================================================================================================================
@@ -78,24 +74,6 @@ def unpack_coords() -> (
 COORDINATES = TIME, LVL, LAT, LON = unpack_coords()
 
 
-def add_alias(col: str, alias: list[str]):
-    df = Coordinates._aliases
-    if col not in df.columns:
-        raise ValueError(f"Column {col} not in aliases")
-    mask = df.stack(dropna=False).isin(alias).unstack().fillna(False).any(axis=0)
-    # print(mask)
-    if df.columns[mask].size > 1:  # type: ignore
-        raise ValueError(f"Alias {alias} already in use")
-
-    x = list(set(df[col].dropna()).union(alias))
-    if len(x) >= df.index.size:
-        for i in range(len(x) - df.index.size):
-            Coordinates._aliases.loc[len(x) - i, :] = None
-
-    Coordinates._aliases.loc[:, col] = x
-    return x
-
-
 # =====================================================================================================================
 #
 # =====================================================================================================================
@@ -115,20 +93,26 @@ LiteralProjection = Literal["laea", "lcc", "lambert_azimuthal_equal_area", "lamb
 LiteralCRS = CoordinateReferenceSystem | LiteralProjection
 
 
-class TimeFrequency(str, VariableEnum):
-    Y = auto_field("datetime64[Y]", aliases=["year"])
-    M = auto_field("datetime64[M]", aliases=["month"])
-    D = auto_field("datetime64[D]", aliases=["day"])
-    h = auto_field("datetime64[h]", aliases=["hour"])
-    m = auto_field("datetime64[m]", aliases=["minute"])
-    s = auto_field("datetime64[s]", aliases=["second"])
-    ms = auto_field("datetime64[ms]", aliases=["millisecond"])
-    us = auto_field("datetime64[us]", aliases=["microsecond"])
-    ns = auto_field("datetime64[ns]", aliases=["nanosecond"])
+_auto_frequency = lambda x: auto_field(x, aliases=[f"datetime64[{x}]", f"timedelta64[{x}]"])
+from typing import Any, Generic, Literal, Mapping, TypeVar, overload
+
+from ._typing import NumpyGeneric_T
+
+
+class FrequencyAccessor(Generic[NumpyGeneric_T]):
+    def __init__(self, x: str):
+        self._x = x
 
     @property
-    def dtype(self) -> np.dtype[np.datetime64]:
-        return np.dtype(self)
+    def dtype(self) -> np.dtype[NumpyGeneric_T]:
+        return np.dtype(self._x)
+
+
+class TimeFrequency(str, VariableEnum):
+    year = _auto_frequency("Y")
+    month = _auto_frequency("M")
+    day = _auto_frequency("D")
+    hour = _auto_frequency("h")
 
     def arange(
         self,
@@ -136,7 +120,7 @@ class TimeFrequency(str, VariableEnum):
         stop: datetime.datetime | np.datetime64 | str | None = None,
         step: int | datetime.timedelta | np.timedelta64 | None = None,
     ) -> Array[[N], np.datetime64]:
-        return np.arange(start, stop, step, dtype=self.dtype)
+        return np.arange(start, stop, step, dtype=self.dt.dtype)
 
     @classmethod
     def _missing_(cls, value) -> TimeFrequency:
@@ -145,7 +129,7 @@ class TimeFrequency(str, VariableEnum):
         raise ValueError(f"Invalid value for {cls.__class__.__name__}: {value!r}")
 
     def timedelta(self, value: int | datetime.timedelta | np.timedelta64) -> np.timedelta64:
-        return np.timedelta64(value, self.name)
+        return np.timedelta64(value, self)
 
     @overload
     def datetime(
@@ -158,8 +142,8 @@ class TimeFrequency(str, VariableEnum):
     def datetime(
         self,
         year: int,
-        month: int = ...,
-        day: int = ...,
+        month: int,
+        day: int,
         hour: int = ...,
         minute: int = ...,
         second: int = ...,
@@ -172,10 +156,18 @@ class TimeFrequency(str, VariableEnum):
     def datetime(self, year: int | datetime.datetime | np.datetime64 | str | None = None, *args: Any) -> np.datetime64:
         if args and isinstance(year, int):
             year = datetime.datetime(year, *args)
-        return np.datetime64(year, self.name)  # type: ignore
+        return np.datetime64(year, self)
+
+    @property
+    def dt(self) -> FrequencyAccessor[np.datetime64]:
+        return FrequencyAccessor(self.aliases[0])
+
+    @property
+    def td(self) -> FrequencyAccessor[np.timedelta64]:
+        return FrequencyAccessor(self.aliases[1])
 
 
-TimeFrequencyLike = (
+TimeFrequencyLike: TypeAlias = (
     TimeFrequency
     | np.dtype[np.datetime64]
     | Literal[
@@ -207,18 +199,6 @@ TimeFrequencyLike = (
         "microsecond",
         "nanosecond",
     ]
-)
-
-year, month, day, hour, minute, second, millisecond, microsecond, nanosecond = (
-    TimeFrequency.Y,
-    TimeFrequency.M,
-    TimeFrequency.D,
-    TimeFrequency.h,
-    TimeFrequency.m,
-    TimeFrequency.s,
-    TimeFrequency.ms,
-    TimeFrequency.us,
-    TimeFrequency.ns,
 )
 
 
