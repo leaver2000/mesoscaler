@@ -12,7 +12,6 @@ from .enums import (
     Dimensions,
     IndependentVariables,
     T,
-    TimeFrequency,
     X,
     Y,
     Z,
@@ -24,6 +23,7 @@ from .generic import DataGenerator
 from .sampling.domain import DatasetSequence, Domain
 from .sampling.resampler import ReSampler
 from .sampling.sampler import AreaOfInterestSampler, LinearSampler
+from .time64 import years, months, days, hours, minutes, seconds, milliseconds, microseconds, nanoseconds
 
 __all__ = [
     # - core -
@@ -60,9 +60,18 @@ __all__ = [
     "unpack_coords",
     "unpack_dims",
     "auto_field",
-    "TimeFrequency",
     # - utils -
     "utils",
     # - create -
     "create",
+    # - datetime64 -
+    "years",
+    "months",
+    "days",
+    "hours",
+    "minutes",
+    "seconds",
+    "milliseconds",
+    "microseconds",
+    "nanoseconds",
 ]

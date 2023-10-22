@@ -15,6 +15,7 @@ from ._metadata import (
     auto_field,
 )
 from ._typing import Any, Array, Literal, Mapping, N, TypeAlias, TypeVar, overload
+from typing import Any, Generic, Literal, Mapping, TypeVar, overload
 
 _T = TypeVar("_T")
 
@@ -93,113 +94,110 @@ LiteralProjection = Literal["laea", "lcc", "lambert_azimuthal_equal_area", "lamb
 LiteralCRS = CoordinateReferenceSystem | LiteralProjection
 
 
-_auto_frequency = lambda x: auto_field(x, aliases=[f"datetime64[{x}]", f"timedelta64[{x}]"])
-from typing import Any, Generic, Literal, Mapping, TypeVar, overload
-
-from ._typing import NumpyGeneric_T
+# _auto_frequency = lambda x: auto_field(x, aliases=[f"datetime64[{x}]", f"timedelta64[{x}]"])
 
 
-class FrequencyAccessor(Generic[NumpyGeneric_T]):
-    def __init__(self, x: str):
-        self._x = x
+# class FrequencyAccessor(Generic[NumpyGeneric_T]):
+#     def __init__(self, x: str):
+#         self._x = x
 
-    @property
-    def dtype(self) -> np.dtype[NumpyGeneric_T]:
-        return np.dtype(self._x)
-
-
-class TimeFrequency(str, VariableEnum):
-    year = _auto_frequency("Y")
-    month = _auto_frequency("M")
-    day = _auto_frequency("D")
-    hour = _auto_frequency("h")
-
-    def arange(
-        self,
-        start: datetime.datetime | np.datetime64 | str,
-        stop: datetime.datetime | np.datetime64 | str | None = None,
-        step: int | datetime.timedelta | np.timedelta64 | None = None,
-    ) -> Array[[N], np.datetime64]:
-        return np.arange(start, stop, step, dtype=self.dt.dtype)
-
-    @classmethod
-    def _missing_(cls, value) -> TimeFrequency:
-        if isinstance(value, np.dtype) and value.type is np.datetime64:
-            return cls(value.name)
-        raise ValueError(f"Invalid value for {cls.__class__.__name__}: {value!r}")
-
-    def timedelta(self, value: int | datetime.timedelta | np.timedelta64) -> np.timedelta64:
-        return np.timedelta64(value, self)
-
-    @overload
-    def datetime(
-        self,
-        __x: int | datetime.datetime | np.datetime64 | str | None = None,
-    ) -> np.datetime64:
-        ...
-
-    @overload
-    def datetime(
-        self,
-        year: int,
-        month: int,
-        day: int,
-        hour: int = ...,
-        minute: int = ...,
-        second: int = ...,
-        microsecond: int = ...,
-        nanosecond: int = ...,
-        /,
-    ) -> np.datetime64:
-        ...
-
-    def datetime(self, year: int | datetime.datetime | np.datetime64 | str | None = None, *args: Any) -> np.datetime64:
-        if args and isinstance(year, int):
-            year = datetime.datetime(year, *args)
-        return np.datetime64(year, self)
-
-    @property
-    def dt(self) -> FrequencyAccessor[np.datetime64]:
-        return FrequencyAccessor(self.aliases[0])
-
-    @property
-    def td(self) -> FrequencyAccessor[np.timedelta64]:
-        return FrequencyAccessor(self.aliases[1])
+#     @property
+#     def dtype(self) -> np.dtype[NumpyGeneric_T]:
+#         return np.dtype(self._x)
 
 
-TimeFrequencyLike: TypeAlias = (
-    TimeFrequency
-    | np.dtype[np.datetime64]
-    | Literal[
-        "datetime64[Y]",
-        "datetime64[M]",
-        "datetime64[D]",
-        "datetime64[h]",
-        "datetime64[m]",
-        "datetime64[s]",
-        "datetime64[ms]",
-        "datetime64[us]",
-        "datetime64[ns]",
-        "Y",
-        "M",
-        "D",
-        "h",
-        "m",
-        "s",
-        "ms",
-        "us",
-        "ns",
-        "year",
-        "month",
-        "day",
-        "hour",
-        "minute",
-        "second",
-        "millisecond",
-        "microsecond",
-        "nanosecond",
-    ]
-)
+# class TimeFrequency(str, VariableEnum):
+#     year = _auto_frequency("Y")
+#     month = _auto_frequency("M")
+#     day = _auto_frequency("D")
+#     hour = _auto_frequency("h")
+
+#     def arange(
+#         self,
+#         start: datetime.datetime | np.datetime64 | str,
+#         stop: datetime.datetime | np.datetime64 | str | None = None,
+#         step: int | datetime.timedelta | np.timedelta64 | None = None,
+#     ) -> Array[[N], np.datetime64]:
+#         return np.arange(start, stop, step, dtype=self.dt.dtype)
+
+#     @classmethod
+#     def _missing_(cls, value) -> TimeFrequency:
+#         if isinstance(value, np.dtype) and value.type is np.datetime64:
+#             return cls(value.name)
+#         raise ValueError(f"Invalid value for {cls.__class__.__name__}: {value!r}")
+
+#     def timedelta(self, value: int | datetime.timedelta | np.timedelta64) -> np.timedelta64:
+#         return np.timedelta64(value, self)
+
+#     @overload
+#     def datetime(
+#         self,
+#         __x: int | datetime.datetime | np.datetime64 | str | None = None,
+#     ) -> np.datetime64:
+#         ...
+
+#     @overload
+#     def datetime(
+#         self,
+#         year: int,
+#         month: int,
+#         day: int,
+#         hour: int = ...,
+#         minute: int = ...,
+#         second: int = ...,
+#         microsecond: int = ...,
+#         nanosecond: int = ...,
+#         /,
+#     ) -> np.datetime64:
+#         ...
+
+#     def datetime(self, year: int | datetime.datetime | np.datetime64 | str | None = None, *args: Any) -> np.datetime64:
+#         if args and isinstance(year, int):
+#             year = datetime.datetime(year, *args)
+#         return np.datetime64(year, self)
+
+#     @property
+#     def dt(self) -> FrequencyAccessor[np.datetime64]:
+#         return FrequencyAccessor(self.aliases[0])
+
+#     @property
+#     def td(self) -> FrequencyAccessor[np.timedelta64]:
+#         return FrequencyAccessor(self.aliases[1])
+
+
+# TimeFrequencyLike: TypeAlias = (
+#     TimeFrequency
+#     | np.dtype[np.datetime64]
+#     | Literal[
+#         "datetime64[Y]",
+#         "datetime64[M]",
+#         "datetime64[D]",
+#         "datetime64[h]",
+#         "datetime64[m]",
+#         "datetime64[s]",
+#         "datetime64[ms]",
+#         "datetime64[us]",
+#         "datetime64[ns]",
+#         "Y",
+#         "M",
+#         "D",
+#         "h",
+#         "m",
+#         "s",
+#         "ms",
+#         "us",
+#         "ns",
+#         "year",
+#         "month",
+#         "day",
+#         "hour",
+#         "minute",
+#         "second",
+#         "millisecond",
+#         "microsecond",
+#         "nanosecond",
+#     ]
+# )
 
 
 # =====================================================================================================================
