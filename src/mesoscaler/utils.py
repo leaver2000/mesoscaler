@@ -38,7 +38,6 @@ except (NameError, ImportError):
     except ImportError:
         tqdm = None  # type: ignore
 
-import datetime
 
 from ._typing import (
     Any,
@@ -71,7 +70,6 @@ from ._typing import (
     TypeVar,
     overload,
 )
-
 
 __NoDefault = enum.Enum("", "NoDefault")
 NoDefault = __NoDefault.NoDefault
@@ -179,8 +177,6 @@ def area_definition(
 # =====================================================================================================================
 # - time utils
 # =====================================================================================================================
-
-
 def slice_time(t: Array[[...], np.datetime64], s: TimeSlice, /) -> Array[[N], np.datetime64]:
     if s.start is None or s.stop is None or s.step is not None:
         raise ValueError(f"invalid slice: {s}")
@@ -208,7 +204,7 @@ def batch(x: Array[[N], NumpyGeneric_T], n: int, *, strict: bool = False) -> Arr
     return np.stack(np.split(x, np.arange(n, size, n)))
 
 
-def normalize(x: NDArray[np.number[Any]]) -> NDArray[np.float_]:
+def normalize(x: Array[[...], np.number[Any]]) -> Array[[...], np.float_]:
     """
     Normalize the input tensor along the specified dimensions.
 
@@ -224,7 +220,7 @@ def normalize(x: NDArray[np.number[Any]]) -> NDArray[np.float_]:
     """
     if not isinstance(x, np.ndarray):
         raise TypeError("Input tensor must be a numpy array or a PyTorch tensor.")
-    return (x - x.min()) / (x.max() - x.min())  # pyright: ignore
+    return (x - x.min()) / (x.max() - x.min())
 
 
 def normalized_scale(x: NDArray[np.number[Any]], rate: float = 1.0) -> NDArray[np.float_]:

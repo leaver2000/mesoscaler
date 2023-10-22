@@ -1,4 +1,3 @@
-import numpy as np
 import pandas as pd
 import pytest
 
@@ -17,7 +16,7 @@ from src.mesoscaler.enums import (
     URMA,
     Dimensions,
     T,
-    TimeFrequency,
+    # TimeFrequency,
     X,
     Y,
     Z,
@@ -84,26 +83,3 @@ def test_member_metadata() -> None:
 
     mm = MyEnum._member_metadata
     assert MyEnum.__metadata__[_MEMBER_METADATA] is mm
-
-
-def test_datetime():
-    assert (
-        TimeFrequency.hour.datetime(2023, 1, 1)
-        == TimeFrequency("h").datetime(2023, 1, 1)
-        == TimeFrequency("hour").datetime(2023, 1, 1)
-        == TimeFrequency("datetime64[h]").datetime(2023, 1, 1)
-        == TimeFrequency.hour.datetime("2023-01-01")
-        == TimeFrequency.hour.datetime(TimeFrequency.hour.datetime("2023-01-01"))
-        == np.datetime64("2023-01-01", "h")
-    )
-    assert TimeFrequency.hour.datetime(2023, 1, 1).astype(str) == "2023-01-01T00"
-
-    # assert TimeFrequency.hour.datetime(2023, 1, 1).dtype == TimeFrequency.hour.dt.dtype
-    print(TimeFrequency.hour.dt.dtype)
-    print(TimeFrequency.hour.aliases)
-
-
-def test_timedelta() -> None:
-    for x in TimeFrequency:
-        td = x.timedelta(1)
-        assert isinstance(td, np.timedelta64)

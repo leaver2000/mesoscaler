@@ -6,6 +6,7 @@ import itertools
 
 import numpy as np
 
+from .. import time64, utils
 from .._typing import (
     AreaExtent,
     Array,
@@ -18,8 +19,6 @@ from .._typing import (
     PointOverTime,
     TimeSlice,
 )
-from ..enums import TimeFrequency, TimeFrequencyLike
-from ..utils import repr_
 from .domain import Domain, DomainIntersectionSampler
 
 
@@ -80,7 +79,7 @@ class TimeAndPointSampler(DomainIntersectionSampler[PointOverTime], abc.ABC):
         return len(self.indices)
 
     def __repr__(self) -> str:
-        indices = "\n".join(repr_(self.indices, map_values=True))
+        indices = "\n".join(utils.repr_(self.indices, map_values=True))
         return f"{type(self).__name__}[\n{indices}\n]"
 
 
@@ -90,16 +89,16 @@ class TimeSampler(TimeAndPointSampler):
         domain: Domain,
         /,
         *,
-        time_frequency: TimeFrequencyLike = TimeFrequency("hour"),
+        time_frequency: time64.Time64Like = time64.Time64("hours"),
         time_step: int = 1,
     ) -> None:
         super().__init__(domain)
-        self.time_frequency = TimeFrequency(time_frequency)
+        self.time_frequency = time64.Time64(time_frequency)
         self.time_step = time_step
 
     @property
     def timedelta64(self) -> np.timedelta64:
-        return self.time_frequency.timedelta(self.time_step)
+        return self.time_frequency.delta(self.time_step)
 
     def get_time(self) -> Array[[N], np.datetime64]:
         return self.date_range(step=self.timedelta64)
@@ -113,7 +112,7 @@ class TimeSampler(TimeAndPointSampler):
         freq = self.time_frequency
         start = start or self.min_time
         stop = freq.datetime(stop or self.max_time)
-        stop += freq.timedelta(1)  # end is exclusive
+        stop += freq.delta(1)  # end is exclusive
         return freq.arange(start, stop, step)
 
 
@@ -124,7 +123,7 @@ class LinearSampler(TimeSampler):
         /,
         *,
         lon_lat_frequency: int = 100,
-        time_frequency: TimeFrequencyLike = TimeFrequency("hour"),
+        time_frequency: time64.Time64Like = time64.Time64("hours"),
         time_step: int = 1,
     ) -> None:
         super().__init__(domain, time_frequency=time_frequency, time_step=time_step)
@@ -147,7 +146,7 @@ class AreaOfInterestSampler(TimeSampler):
         /,
         *,
         lon_lat_frequency: int = 5,
-        time_frequency: TimeFrequencyLike = TimeFrequency("hour"),
+        time_frequency: time64.Time64Like = time64.Time64("hours"),
         time_step: int = 1,
         aio: tuple[float, float, float, float] | AreaExtent = (-120, 30.0, -70, 25.0),
     ) -> None:

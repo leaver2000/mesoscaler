@@ -23,7 +23,17 @@ from .generic import DataGenerator
 from .sampling.domain import DatasetSequence, Domain
 from .sampling.resampler import ReSampler
 from .sampling.sampler import AreaOfInterestSampler, LinearSampler
-from .time64 import years, months, days, hours, minutes, seconds, milliseconds, microseconds, nanoseconds
+from .time64 import (
+    days,
+    hours,
+    microseconds,
+    milliseconds,
+    minutes,
+    months,
+    nanoseconds,
+    seconds,
+    years,
+)
 
 __all__ = [
     # - core -

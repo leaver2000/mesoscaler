@@ -1,28 +1,18 @@
 """A mix of Abstract Base Classes and Generic Data Adapters for various data structures."""
 from __future__ import annotations
 
-import datetime
 import enum
 import functools
+from typing import Literal, Mapping, TypeVar
 
-import numpy as np
 import pyproj
 
-from ._metadata import (
-    DependentVariables,
-    IndependentVariables,
-    VariableEnum,
-    auto_field,
-)
-from ._typing import Any, Array, Literal, Mapping, N, TypeAlias, TypeVar, overload
-from typing import Any, Generic, Literal, Mapping, TypeVar, overload
+from ._metadata import DependentVariables, IndependentVariables, auto_field
+from ._typing import Literal, Mapping, TypeAlias, TypeVar
 
 _T = TypeVar("_T")
 
 
-# =====================================================================================================================
-#
-# =====================================================================================================================
 class Dimensions(IndependentVariables):
     T = auto_field(aliases=["t", "time"])
     Z = auto_field(aliases=["z", "level", "height", "altitude"])
@@ -75,16 +65,9 @@ def unpack_coords() -> (
 COORDINATES = TIME, LVL, LAT, LON = unpack_coords()
 
 
-# =====================================================================================================================
-#
-# =====================================================================================================================
 class CoordinateReferenceSystem(functools.partial, enum.Enum):
-    lambert_azimuthal_equal_area = laea = pyproj.CRS, {
-        "proj": "laea",
-    }
-    lambert_conformal_conic = lcc = pyproj.CRS, {
-        "proj": "lcc",
-    }
+    lambert_azimuthal_equal_area = laea = pyproj.CRS, {"proj": "laea"}
+    lambert_conformal_conic = lcc = pyproj.CRS, {"proj": "lcc"}
 
     def from_point(self, longitude: float, latitude: float) -> pyproj.CRS:
         return self(longitude=longitude, latitude=latitude)
@@ -94,115 +77,6 @@ LiteralProjection = Literal["laea", "lcc", "lambert_azimuthal_equal_area", "lamb
 LiteralCRS = CoordinateReferenceSystem | LiteralProjection
 
 
-# _auto_frequency = lambda x: auto_field(x, aliases=[f"datetime64[{x}]", f"timedelta64[{x}]"])
-
-
-# class FrequencyAccessor(Generic[NumpyGeneric_T]):
-#     def __init__(self, x: str):
-#         self._x = x
-
-#     @property
-#     def dtype(self) -> np.dtype[NumpyGeneric_T]:
-#         return np.dtype(self._x)
-
-
-# class TimeFrequency(str, VariableEnum):
-#     year = _auto_frequency("Y")
-#     month = _auto_frequency("M")
-#     day = _auto_frequency("D")
-#     hour = _auto_frequency("h")
-
-#     def arange(
-#         self,
-#         start: datetime.datetime | np.datetime64 | str,
-#         stop: datetime.datetime | np.datetime64 | str | None = None,
-#         step: int | datetime.timedelta | np.timedelta64 | None = None,
-#     ) -> Array[[N], np.datetime64]:
-#         return np.arange(start, stop, step, dtype=self.dt.dtype)
-
-#     @classmethod
-#     def _missing_(cls, value) -> TimeFrequency:
-#         if isinstance(value, np.dtype) and value.type is np.datetime64:
-#             return cls(value.name)
-#         raise ValueError(f"Invalid value for {cls.__class__.__name__}: {value!r}")
-
-#     def timedelta(self, value: int | datetime.timedelta | np.timedelta64) -> np.timedelta64:
-#         return np.timedelta64(value, self)
-
-#     @overload
-#     def datetime(
-#         self,
-#         __x: int | datetime.datetime | np.datetime64 | str | None = None,
-#     ) -> np.datetime64:
-#         ...
-
-#     @overload
-#     def datetime(
-#         self,
-#         year: int,
-#         month: int,
-#         day: int,
-#         hour: int = ...,
-#         minute: int = ...,
-#         second: int = ...,
-#         microsecond: int = ...,
-#         nanosecond: int = ...,
-#         /,
-#     ) -> np.datetime64:
-#         ...
-
-#     def datetime(self, year: int | datetime.datetime | np.datetime64 | str | None = None, *args: Any) -> np.datetime64:
-#         if args and isinstance(year, int):
-#             year = datetime.datetime(year, *args)
-#         return np.datetime64(year, self)
-
-#     @property
-#     def dt(self) -> FrequencyAccessor[np.datetime64]:
-#         return FrequencyAccessor(self.aliases[0])
-
-#     @property
-#     def td(self) -> FrequencyAccessor[np.timedelta64]:
-#         return FrequencyAccessor(self.aliases[1])
-
-
-# TimeFrequencyLike: TypeAlias = (
-#     TimeFrequency
-#     | np.dtype[np.datetime64]
-#     | Literal[
-#         "datetime64[Y]",
-#         "datetime64[M]",
-#         "datetime64[D]",
-#         "datetime64[h]",
-#         "datetime64[m]",
-#         "datetime64[s]",
-#         "datetime64[ms]",
-#         "datetime64[us]",
-#         "datetime64[ns]",
-#         "Y",
-#         "M",
-#         "D",
-#         "h",
-#         "m",
-#         "s",
-#         "ms",
-#         "us",
-#         "ns",
-#         "year",
-#         "month",
-#         "day",
-#         "hour",
-#         "minute",
-#         "second",
-#         "millisecond",
-#         "microsecond",
-#         "nanosecond",
-#     ]
-# )
-
-
-# =====================================================================================================================
-#
-# =====================================================================================================================
 class ERA5(DependentVariables):
     r"""
     | member_name   | short_name   | standard_name       | long_name           | type_of_level   | units      |

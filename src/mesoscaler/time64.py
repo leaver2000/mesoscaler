@@ -5,7 +5,7 @@ import datetime
 import numpy as np
 
 from ._metadata import VariableEnum, auto_field
-from ._typing import Any, Array, Literal, N, TypeAlias, overload
+from ._typing import Any, Array, Literal, N, TypeAlias, Union, overload
 
 TimeDeltaValue: TypeAlias = datetime.timedelta | np.timedelta64 | int
 DateTimeValue: TypeAlias = datetime.datetime | np.datetime64 | str | float
@@ -51,14 +51,14 @@ Time64Literal: TypeAlias = Literal[
     "microseconds",
     "nanoseconds",
 ]
-Time64Like: TypeAlias = """(
-    Time64
-    | np.dtype[np.datetime64]
-    | np.dtype[np.timedelta64]
-    | Time64Literal
-    | Datetime64UnitLiteral
-    | TimeDelta64UnitLiteral
-)"""
+Time64Like: TypeAlias = Union[
+    "Time64",
+    np.dtype[np.datetime64],
+    np.dtype[np.timedelta64],
+    Time64Literal,
+    Datetime64UnitLiteral,
+    TimeDelta64UnitLiteral,
+]
 
 
 _auto_frequency = lambda x: auto_field(x, aliases=[f"datetime64[{x}]", f"timedelta64[{x}]"])
