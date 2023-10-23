@@ -25,8 +25,6 @@ import urllib.parse
 from collections.abc import Sequence
 
 import numpy as np
-import pyproj
-import pyresample.geometry
 import toml
 
 try:
@@ -42,7 +40,6 @@ except (NameError, ImportError):
 from ._typing import (
     Any,
     AnyArrayLike,
-    AreaExtent,
     Array,
     Callable,
     CanBeItems,
@@ -141,37 +138,6 @@ def is_null(value: Any) -> bool:
     """
     # pylint: disable=comparison-with-itself
     return value != value or value is None
-
-
-# =====================================================================================================================
-# - projection utils
-# =====================================================================================================================
-def area_definition(
-    width: float,
-    height: float,
-    projection: pyproj.CRS,
-    area_extent: AreaExtent,
-    lons: NDArray[np.float_] | None = None,
-    lats: NDArray[np.float_] | None = None,
-    dtype: Any = np.float_,
-    area_id: str = "undefined",
-    description: str = "undefined",
-    proj_id: str = "undefined",
-    nprocs: int = 1,
-) -> pyresample.geometry.AreaDefinition:
-    return pyresample.geometry.AreaDefinition(
-        area_id,
-        description,
-        proj_id,
-        width=width,
-        height=height,
-        projection=projection,
-        area_extent=area_extent,
-        lons=lons,
-        lats=lats,
-        dtype=dtype,
-        nprocs=nprocs,
-    )
 
 
 # =====================================================================================================================

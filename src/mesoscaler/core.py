@@ -73,7 +73,6 @@ DEFAULT_LEVEL_STEP = -25
 DEFAULT_HEIGHT = DEFAULT_WIDTH = 80  # - px
 DEFAULT_DX = DEFAULT_DY = 200.0  # - km
 DEFAULT_SCALE_RATE = 15.0
-DEFAULT_TARGET_PROJECTION: Final[LiteralCRS] = "lambert_azimuthal_equal_area"
 DEFAULT_RESAMPLE_METHOD: Final[Literal["nearest"]] = "nearest"
 
 DERIVED_SURFACE_COORDINATE = {LVL: (LVL.axis, [STANDARD_SURFACE_PRESSURE])}
@@ -494,14 +493,21 @@ class DataProducer(DataWorker[PointOverTime, Array[[Nv, Nt, Nz, Ny, Nx], np.floa
 #  - functions
 # =====================================================================================================================
 def _open_datasets(
-    paths: CanBeItems[StrPath, Depends], *, levels: ListLike[Number] | None = None
+    paths: CanBeItems[StrPath, Depends], *, levels: ListLike[Number] | None = None, times: Any = None
 ) -> Iterable[DependentDataset]:
     for path, depends in items(paths):
         ds = DependentDataset.from_zarr(path, depends)
-        if levels is not None:
+        if levels is not None and times is not None:
+            ds = ds.sel({LVL: ds.level.isin(levels), TIME: ds.time.isin(times)})
+        elif levels is not None:
             ds = ds.sel({LVL: ds.level.isin(levels)})
+        elif times is not None:
+            ds = ds.sel({TIME: ds.time.isin(times)})
+
         yield ds
 
 
-def open_datasets(paths: CanBeItems[StrPath, Depends], *, levels: ListLike[Number] | None = None) -> DatasetSequence:
-    return DatasetSequence(_open_datasets(paths, levels=levels))
+def open_datasets(
+    paths: CanBeItems[StrPath, Depends], *, levels: ListLike[Number] | None = None, times: Any = None
+) -> DatasetSequence:
+    return DatasetSequence(_open_datasets(paths, levels=levels, times=times))

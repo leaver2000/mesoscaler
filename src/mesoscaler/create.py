@@ -48,18 +48,7 @@ from .core import (
     Mesoscale,
     open_datasets,
 )
-from .enums import (
-    LAT,
-    LON,
-    LVL,
-    TIME,
-    Coordinates,
-    DependentVariables,
-    T,
-    X,
-    Y,
-    Z,
-)
+from .enums import LAT, LON, LVL, TIME, Coordinates, DependentVariables, T, X, Y, Z
 from .generic import DataGenerator
 from .sampling.domain import DatasetSequence, Domain
 from .sampling.resampler import ReSampler
@@ -231,10 +220,10 @@ def producer(
         rate=rate,
         levels=levels,
     )
-    resampler = scale.resample(dsets, height=height, width=width, method=method)
+
+    resampler = scale.resample(DatasetSequence(dsets).fit(scale), height=height, width=width, method=method)
     if callable(indices):
         indices = indices(resampler.domain, **sampler_kwargs)
-
     return DataProducer(indices, resampler=resampler)
 
 
@@ -260,7 +249,7 @@ def generator(
     **sampler_kwargs: Any,
 ) -> DataGenerator[Array[[Nv, Nt, Nz, Ny, Nx], np.float_]]:
     datasets = open_datasets(paths, levels=levels)
-    prod = producer(
+    data_producer = producer(
         datasets,
         indices,
         dx=dx,
@@ -274,11 +263,10 @@ def generator(
         levels=levels,
         height=height,
         width=width,
-        # target_projection=target_projection,
         method=method,
         **sampler_kwargs,
     )
-    return DataGenerator(prod, maxsize=maxsize, timeout=timeout)
+    return DataGenerator(data_producer, maxsize=maxsize, timeout=timeout)
 
 
 def loader(

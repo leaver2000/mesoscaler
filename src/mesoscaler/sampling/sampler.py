@@ -52,17 +52,19 @@ class TimeAndPointSampler(DomainIntersectionSampler[PointOverTime], abc.ABC):
         ...
 
     @abc.abstractmethod
-    def get_time(self) -> Array[[Nt], np.datetime64]:
+    def get_time(self) -> Array[[N], np.datetime64] | Array[[N, N], np.datetime64]:
         ...
 
     # =================================================================================================================
-    def iter_time(self) -> Iterator[TimeSlice]:
+    def iter_time(self) -> Iterator[TimeSlice | Array[[N], np.datetime64]]:
         time_indices = self.get_time()
+        if time_indices.ndim == 1:
+            timedelta = self.timedelta64
+            mask = np.abs(time_indices.max() - time_indices) >= timedelta
 
-        timedelta = self.timedelta64
-        mask = np.abs(time_indices.max() - time_indices) >= timedelta
-
-        return (np.s_[time : time + timedelta] for time in time_indices[mask])
+            return (np.s_[time : time + timedelta] for time in time_indices[mask])
+        assert time_indices.ndim == 2
+        yield from time_indices
 
     def iter_points(self) -> Iterator[Point]:
         lons, lats = self.get_lon_lats()
@@ -90,7 +92,7 @@ class TimeSampler(TimeAndPointSampler):
         /,
         *,
         time_frequency: time64.Time64Like = time64.Time64("hours"),
-        time_step: int = 1,
+        time_step: int = 3,
     ) -> None:
         super().__init__(domain)
         self.time_frequency = time64.Time64(time_frequency)
@@ -100,8 +102,8 @@ class TimeSampler(TimeAndPointSampler):
     def timedelta64(self) -> np.timedelta64:
         return self.time_frequency.delta(self.time_step)
 
-    def get_time(self) -> Array[[N], np.datetime64]:
-        return self.date_range(step=self.timedelta64)
+    def get_time(self) -> Array[[N, N], np.datetime64]:
+        return self.batch_time(self.time_step)
 
     def date_range(
         self,
@@ -131,10 +133,7 @@ class LinearSampler(TimeSampler):
 
     def get_lon_lats(self) -> tuple[Array[[N], np.float_], Array[[N], np.float_]]:
         frequency = self.lon_lat_frequency
-        return (
-            self.linspace("lon", frequency=frequency),
-            self.linspace("lat", frequency=frequency),
-        )
+        return (self.linspace("lon", frequency=frequency), self.linspace("lat", frequency=frequency))
 
 
 class AreaOfInterestSampler(TimeSampler):
