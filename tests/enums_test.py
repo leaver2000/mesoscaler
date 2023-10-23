@@ -1,13 +1,26 @@
 import pandas as pd
 import pytest
-import numpy as np
+
 from src.mesoscaler._metadata import (
-    CLASS_METADATA,
-    MEMBER_METADATA,
+    _CLASS_METADATA,
+    _MEMBER_METADATA,
     VariableEnum,
     auto_field,
 )
-from src.mesoscaler.enums import ERA5, LAT, LON, LVL, TIME, URMA, Dimensions, T, X, Y, Z, TimeFrequency
+from src.mesoscaler.enums import (
+    ERA5,
+    LAT,
+    LON,
+    LVL,
+    TIME,
+    URMA,
+    Dimensions,
+    T,
+    # TimeFrequency,
+    X,
+    Y,
+    Z,
+)
 
 
 def test_coordinate_axes() -> None:
@@ -60,18 +73,13 @@ def test_my_enum_metadata() -> None:
 
 
 def test_my_enum_class_metadata() -> None:
-    class_meta = MyEnum.__metadata__[CLASS_METADATA]
+    class_meta = MyEnum.__metadata__[_CLASS_METADATA]
     assert class_meta is MyEnum.metadata
 
 
 def test_member_metadata() -> None:
     member_meta = MyEnum.A.metadata
-    assert member_meta is MyEnum.__metadata__[MEMBER_METADATA]["A"]
+    assert member_meta is MyEnum.__metadata__[_MEMBER_METADATA]["A"]
 
     mm = MyEnum._member_metadata
-    assert MyEnum.__metadata__[MEMBER_METADATA] is mm
-
-
-def test_timedelta() -> None:
-    for x in TimeFrequency:
-        assert isinstance(x.timedelta(1), np.timedelta64)
+    assert MyEnum.__metadata__[_MEMBER_METADATA] is mm

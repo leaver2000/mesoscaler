@@ -38,7 +38,6 @@ except (NameError, ImportError):
     except ImportError:
         tqdm = None  # type: ignore
 
-import datetime
 
 from ._typing import (
     Any,
@@ -46,16 +45,20 @@ from ._typing import (
     AreaExtent,
     Array,
     Callable,
+    CanBeItems,
     GenericAliasType,
     Hashable,
     Iterable,
     Iterator,
     ListLike,
     Literal,
+    Mapping,
     N,
+    NamedTuple,
     NDArray,
     NewType,
     Number_T,
+    NumpyGeneric_T,
     NumpyNumber_T,
     Pair,
     Self,
@@ -67,7 +70,11 @@ from ._typing import (
     TypeVar,
     overload,
 )
-from .enums import LiteralNoDefault, NoDefault, TimeFrequency, TimeFrequencyLike
+
+__NoDefault = enum.Enum("", "NoDefault")
+NoDefault = __NoDefault.NoDefault
+LiteralNoDefault = Literal[__NoDefault.NoDefault]
+del __NoDefault
 
 _T1 = TypeVar("_T1", bound=Any)
 _T2 = TypeVar("_T2")
@@ -116,6 +123,26 @@ def is_array_like(x: Any) -> TypeGuard[AnyArrayLike]:
     return hasattr(x, "ndim") and not is_scalar(x)
 
 
+def is_named_tuple(x: Any) -> TypeGuard[NamedTuple]:
+    return isinstance(x, tuple) and hasattr(x, "_fields")
+
+
+def is_pair(x: Any, strict: bool = False) -> TypeGuard[Pair[Any]]:
+    condition = isinstance(x, tuple) and len(x) == 2
+    if condition and strict:
+        y, z = x
+        condition &= type(y) == type(z)
+    return condition
+
+
+def is_null(value: Any) -> bool:
+    """
+    Check if value is NaN or None
+    """
+    # pylint: disable=comparison-with-itself
+    return value != value or value is None
+
+
 # =====================================================================================================================
 # - projection utils
 # =====================================================================================================================
@@ -150,28 +177,35 @@ def area_definition(
 # =====================================================================================================================
 # - time utils
 # =====================================================================================================================
-
-
-def date_range(
-    start: datetime.datetime | np.datetime64 | str,
-    end: datetime.datetime | np.datetime64 | str,
-    step: int | datetime.timedelta | np.timedelta64 | None = None,
-    *,
-    freq: TimeFrequencyLike = TimeFrequency("hour"),
-) -> Array[[N], np.datetime64]:
-    return TimeFrequency(freq).arange(start, end, step)
-
-
+# TODO: move this to time64
 def slice_time(t: Array[[...], np.datetime64], s: TimeSlice, /) -> Array[[N], np.datetime64]:
     if s.start is None or s.stop is None or s.step is not None:
         raise ValueError(f"invalid slice: {s}")
-    return t[(s.start <= t) | (t <= s.stop)]
+    return t[(s.start <= t) & (t <= s.stop)]
 
 
 # =====================================================================================================================
 # - array/tensor utils
 # =====================================================================================================================
-def normalize(x: NDArray[np.number[Any]]) -> NDArray[np.float_]:
+def batch(x: Array[[N], NumpyGeneric_T], n: int, *, strict: bool = False) -> Array[[N, N], NumpyGeneric_T]:
+    """
+    >>> time = np.arange(datetime.date(2020, 1, 1), datetime.date(2020, 2, 1), datetime.timedelta(hours=1)).astype(
+        "datetime64[h]"
+    )
+    >>> a = batch(time, 6)
+    >>> a.shape
+    >>> (124, 6)
+    """
+    size = x.size
+    if size % n != 0:
+        if strict:
+            raise Exception(f"{size % n}")
+        x = np.pad(x, (0, n - size % n))
+
+    return np.stack(np.split(x, np.arange(n, size, n)))
+
+
+def normalize(x: Array[[...], np.number[Any]]) -> Array[[...], np.float_]:
     """
     Normalize the input tensor along the specified dimensions.
 
@@ -187,7 +221,7 @@ def normalize(x: NDArray[np.number[Any]]) -> NDArray[np.float_]:
     """
     if not isinstance(x, np.ndarray):
         raise TypeError("Input tensor must be a numpy array or a PyTorch tensor.")
-    return (x - x.min()) / (x.max() - x.min())  # pyright: ignore
+    return (x - x.min()) / (x.max() - x.min())
 
 
 def normalized_scale(x: NDArray[np.number[Any]], rate: float = 1.0) -> NDArray[np.float_]:
@@ -260,20 +294,26 @@ def interp_frames(
     return interp(values).astype(arr.dtype)
 
 
+def overlapping(data: Sequence[Array[[N], NumpyGeneric_T]], sort: bool = True) -> Array[[N], NumpyGeneric_T]:
+    # TODO: need to check if the function below is equivalent to this function
+    # import functools
+    # import numpy as np
+    # f = functools.reduce(np.intersect1d, data)
+
+    x = np.unique(np.concatenate(data))
+    mask = np.stack([np.isin(x, y) for y in data], axis=1).all(axis=1)
+    x = x[mask]
+    if sort:
+        x.sort()
+    return x
+
+
 # =====================================================================================================================
 # - repr utils
 # =====================================================================================================================
-
-
 class Representation(str):
     array_ = staticmethod(
-        functools.partial(
-            np.array2string,
-            max_line_width=100,
-            precision=2,
-            separator=" ",
-            floatmode="fixed",
-        )
+        functools.partial(np.array2string, max_line_width=100, precision=2, separator=" ", floatmode="fixed")
     )
 
     @classmethod
@@ -306,7 +346,7 @@ class Representation(str):
     def __new__(cls, x: Any, *, none: Any = None) -> Representation:
         if isinstance(x, Representation):
             return x
-        elif isinstance(x, str):
+        elif isinstance(x, str) or is_named_tuple(x):
             pass
         elif isinstance(x, np.datetime64):
             x = np.datetime_as_string(x, unit="s") + "Z"
@@ -347,7 +387,12 @@ def repr_(x: Any, *, none: Any = None, map_values: bool = False) -> Representati
 def _repr_generator(*args: tuple[str, Any], prefix: str = "- ") -> Iterator[str]:
     k, _ = zip(*args)
     width = max(map(len, k))
-    return (f"{prefix}{key.rjust(width)}: {repr_(value)}" for key, value in args)
+    for key, value in args:
+        key = f"{prefix}{key.rjust(width)}: "
+        if isinstance(value, np.ndarray) and value.ndim > 1:
+            key += "\n"
+
+        yield f"{key}{repr_(value)}"
 
 
 def join_kv(
@@ -360,9 +405,9 @@ def join_kv(
     if isinstance(head, tuple):
         args = (head, *args)
         head = ""
-
     elif isinstance(head, type):
         head = f"{head.__name__}:"
+
     if start is not NoDefault and stop is not NoDefault:
         text = sep.join(_repr_generator(*((str(k), v) for k, v in args[start:stop])))
         text += "\n...\n"
@@ -387,24 +432,14 @@ def sort_unique(__x: ListLike[Number_T], /, *, descending=False) -> list[Number_
 
 
 def sort_unique(
-    __x: ListLike[Number_T] | Sequence[Number_T] | Array[[...], NumpyNumber_T],
+    __x: Iterable[Number_T] | Array[[...], NumpyNumber_T],
     /,
     *,
     descending=False,
     axis: int | None = None,
 ) -> list[Number_T] | Array[[...], NumpyNumber_T]:
     x = (
-        np.sort(
-            np.unique(
-                __x,
-                return_index=False,
-                return_inverse=False,
-                return_counts=False,
-                axis=axis,
-            )
-        )
-        if isinstance(__x, np.ndarray)
-        else sorted(set(__x))
+        np.sort(np.unique(__x, axis=axis)) if isinstance(__x, np.ndarray) else sorted(set(__x))
     )  # type: list[Number_T] | Array[[...], NumpyNumber_T]
 
     if descending:
@@ -498,6 +533,46 @@ def squish_map(__func: Callable[[_T1], _T2], __iterable: _T1 | Iterable[_T1], /,
     """
 
     return map(__func, squish_chain(__iterable, *args))
+
+
+def iter_pair(x: Pair[Any] | Iterable[Pair[Any]]) -> Iterator[Pair[Any]]:
+    if is_pair(x):
+        yield x
+    else:
+        yield from x
+
+
+@overload
+def items(x: tuple[_T1, _T2], /, *args: tuple[_T1, _T2]) -> itertools.chain[tuple[_T1, _T2]]:
+    ...
+
+
+@overload
+def items(x: CanBeItems[_T1, _T2], /, *args: tuple[_T1, _T2]) -> itertools.chain[tuple[_T1, _T2]]:
+    ...
+
+
+@overload
+def items(x: CanBeItems[str, _T2], /, *args: tuple[str, _T2], **kwargs: _T2) -> itertools.chain[tuple[str, _T2]]:
+    ...
+
+
+def items(
+    x: tuple[_T1 | str, _T2] | CanBeItems[_T1 | str, _T2], /, *args: tuple[_T1 | str, _T2], **kwargs: _T2
+) -> itertools.chain[tuple[_T1, _T2]] | itertools.chain[tuple[str, _T2]]:
+    """
+    >>> assert (
+        list(utils.items({"a": 1, "b": 2}))
+        == list(utils.items([("a", 1), ("b", 2)]))
+        == list(utils.items(("a", 1), ("b", 2)))
+        == list(utils.items(zip("ab", (1, 2))))
+        == [("a", 1), ("b", 2)]
+    )
+    """
+    if isinstance(x, tuple):
+        x = iter_pair(x)
+
+    return itertools.chain((x.items() if isinstance(x, Mapping) else x), args, kwargs.items())
 
 
 # =====================================================================================================================

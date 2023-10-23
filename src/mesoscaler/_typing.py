@@ -52,12 +52,13 @@ __all__ = [
     "MutableMapping",
     "NamedTuple",
     "NumpyDType_T",
-    "PandasDType_T",
-    "PandasArrayLike",
+    "DependentDataset",
 ]
 import datetime
+import enum
 import os
 import sys
+import types
 import typing
 from typing import (
     TYPE_CHECKING,
@@ -88,8 +89,11 @@ from typing import (
     overload,
 )
 
+import dask.array
 import numpy as np
 import pandas as pd
+import xarray as xr
+from numpy._typing._nested_sequence import _NestedSequence as NestedSequence
 
 if sys.version_info <= (3, 9):
     from typing_extensions import ParamSpec, Self, TypeAlias, TypeVarTuple, Unpack
@@ -104,75 +108,49 @@ else:
     from types import EllipsisType
     from typing import ParamSpec, Self, TypeAlias, TypeVarTuple, Unpack
 
-import enum
-import types
+_P = ParamSpec("_P")
+_T = TypeVar("_T", bound=Any)
+_T_co = TypeVar("_T_co", bound=Any, covariant=True)
 
-from numpy._typing._nested_sequence import _NestedSequence as NestedSequence
-from pandas._typing import Dtype
-from pandas.core.arrays.base import ExtensionArray
+
+if TYPE_CHECKING:
+
+    class Nd(Concatenate["_P"]):
+        ...
+
+    from numpy._typing._array_like import _ArrayLike as ArrayLike
+
+    from .core import DependentDataset
+
+else:
+    Nd = Concatenate
+    DependentDataset: TypeAlias = Any
+    ArrayLike = np.ndarray[Any, _T_co]
+
 
 GenericAliasType: type[types.GenericAlias] = getattr(typing, "_GenericAlias", types.GenericAlias)
 Undefined = enum.Enum("Undefined", names="_", module=__name__)
 
 # =====================================================================================================================
-_P = ParamSpec("_P")
-_T = TypeVar("_T", bound=Any)
-_T_co = TypeVar("_T_co", bound=Any, covariant=True)
-_T_contra = TypeVar("_T_contra", bound=Any, covariant=True)
-_Numpy_T_co = TypeVar("_Numpy_T_co", bound=np.generic, covariant=True)
-NumpyNumber_T = TypeVar("NumpyNumber_T", bound=np.number)
-Number_T = TypeVar("Number_T", bound="Number", covariant=True)
+
+NumpyGeneric_T = TypeVar("NumpyGeneric_T", bound=np.generic, covariant=True)
 NumpyDType_T = TypeVar("NumpyDType_T", bound=np.dtype[Any])
-PandasDType_T = TypeVar(
-    "PandasDType_T",
-    bound=Union[
-        Any,
-        str,
-        bytes,
-        datetime.date,
-        datetime.time,
-        bool,
-        int,
-        float,
-        complex,
-        Dtype,
-        datetime.datetime,  # includes pd.Timestamp
-        datetime.timedelta,  # includes pd.Timedelta
-        pd.Period,
-        "pd.Interval[int | float | pd.Timestamp | pd.Timedelta]",
-        pd.CategoricalDtype,
-    ],
-)
+NumpyNumber_T = TypeVar("NumpyNumber_T", bound=np.number[Any])
 
-if TYPE_CHECKING:
-
-    class Nd(Concatenate[_P]):
-        ...
-
-    PandasArrayLike: TypeAlias = Union[
-        pd.Index[_T_co],
-        pd.Series[_T_co],
-    ]
-
-else:
-    Nd = Concatenate
-    PandasArrayLike: TypeAlias = Union[
-        pd.Index,
-        pd.Series,
-        list[_T_co],
-    ]
+Number_T = TypeVar("Number_T", bound="Number")
 
 
 NumberT = TypeVar("NumberT", bound="Number")
 HashableT = TypeVar("HashableT", bound=Hashable)
 
 # - builtins
-Method = Callable[Concatenate[_T, _P], _T_co]
-ClassMethod = Callable[Concatenate[type[_T], _P], _T_co]
 Pair: TypeAlias = tuple[_T, _T]
 DictStr: TypeAlias = dict[str, _T]
 DictStrAny: TypeAlias = DictStr[Any]
 StrPath: TypeAlias = "str | os.PathLike[str]"
+Method: TypeAlias = Callable[Concatenate[_T, _P], _T_co]
+ClassMethod: TypeAlias = Callable[Concatenate[type[_T], _P], _T_co]
+CanBeItems: TypeAlias = Mapping[_T, _T_co] | Iterable[tuple[_T, _T_co]]
 
 # - numpy
 Int: TypeAlias = int | np.integer[Any]
@@ -234,26 +212,26 @@ class Shaped(Sized, Protocol):
         ...
 
 
-Array: TypeAlias = np.ndarray[Nd[_P], np.dtype[_Numpy_T_co]]
+Array: TypeAlias = np.ndarray[Nd[_P], np.dtype[NumpyGeneric_T]]
 """>>> x: Array[[int, int], np.int_] = np.array([[1, 2, 3]]) # Array[(int, int), int]"""
-NDArray: TypeAlias = Array[[...], _Numpy_T_co]
+NDArray: TypeAlias = Array[[...], NumpyGeneric_T]
 List: TypeAlias = list[_T | Any]
 TensorLike: TypeAlias = Union[Array[_P, _T_co], NDArray[_T_co]]
 
 # - NewType
-N = NewType(":", Any)
-N1 = NewType("1", Any)
-N2 = NewType("2", Any)
-N3 = NewType("3", Any)
-N4 = NewType("4", Any)
+N = NewType("N", int)
+Nv = NewType("Nv", int)
+Nt = NewType("Nt", int)
+Nz = NewType("Nz", int)
+Ny = NewType("Ny", int)
+Nx = NewType("Nx", int)
+N1 = NewType("1", int)
+N2 = NewType("2", int)
+N3 = NewType("3", int)
+N4 = NewType("4", int)
 
-ArrayLike: TypeAlias = Union[np.ndarray[Any, _T_co], ExtensionArray]
 
-AnyArrayLike: TypeAlias = Union[
-    np.ndarray[Any, _T_contra],
-    PandasArrayLike[PandasDType_T],
-    list[PandasDType_T],
-]
+AnyArrayLike: TypeAlias = Array[[...], NumpyGeneric_T] | xr.DataArray | dask.array.Array
 
 ListLike: TypeAlias = Sequence[_T_co] | Iterator[_T_co]
 AreaExtent: TypeAlias = Array[[N4], np.float_]
@@ -261,4 +239,4 @@ AreaExtent: TypeAlias = Array[[N4], np.float_]
 Longitude: TypeAlias = float
 Latitude: TypeAlias = float
 Point: TypeAlias = tuple[Longitude, Latitude]
-TimeSlicePoint: TypeAlias = tuple[TimeSlice, Point]
+PointOverTime: TypeAlias = tuple[Point, TimeSlice | Array[[N], np.datetime64]]

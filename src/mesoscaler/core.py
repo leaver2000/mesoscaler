@@ -1,20 +1,22 @@
 from __future__ import annotations
 
 import functools
+import html
 
 import numpy as np
 import pandas as pd
 import pyproj
 import xarray as xr
+import xarray.core.formatting_html
 from pyresample.geometry import GridDefinition
 from xarray.core.coordinates import DatasetCoordinates
 
+from . import display
 from ._typing import (
-    N2,
     N4,
     Any,
     Array,
-    Callable,
+    CanBeItems,
     Final,
     Hashable,
     Iterable,
@@ -22,11 +24,16 @@ from ._typing import (
     Literal,
     Mapping,
     N,
-    NDArray,
+    Nt,
     Number,
+    Nv,
+    Nx,
+    Ny,
+    Nz,
+    PointOverTime,
     Self,
     Sequence,
-    TimeSlicePoint,
+    StrPath,
     TypeAlias,
     Union,
 )
@@ -39,20 +46,18 @@ from .enums import (
     Coordinates,
     DependentVariables,
     Dimensions,
-    LiteralCRS,
+    DimensionsMapType,
     T,
     X,
     Y,
     Z,
 )
-from .generic import Data, DataGenerator, DataWorker
-from .sampling.intersection import AbstractIntersection, DatasetIntersection
-from .sampling.resampler import Nt, Nv, Nx, Ny, Nz, ReSampler
-from .sampling.sampler import LinearSampler
-from .utils import log_scale, sort_unique
+from .generic import Data, DataWorker
+from .sampling.domain import UNITS, AbstractDomain, DatasetSequence, Domain
+from .sampling.resampler import ReSampler
+from .utils import items, join_kv, log_scale, sort_unique
 
 Depends: TypeAlias = Union[type[DependentVariables], DependentVariables, Sequence[DependentVariables], "Dependencies"]
-
 Unit = Literal["km", "m"]
 # =====================================================================================================================
 # - hPa scaling -
@@ -77,7 +82,7 @@ or near surface parameter. The vertical coordinate is then set to the standard s
 
 _units: Mapping[Unit, float] = {"km": 1.0, "m": 1000.0}
 _VARIABLES = "variables"
-_GRID_DEFINITION = "grid_definition"
+_GRID_DEFINITION_ATTRIBUTE = "grid_definition"
 _DEPENDS = "depends"
 
 
@@ -108,7 +113,11 @@ class Dependencies:
         self.enum, self.depends = self._validate_variables(depends)
 
     def __repr__(self) -> str:
-        return f"{self.__class__.__name__}({self.enum.__name__})"
+        return f"{self.__class__.__name__}({self.dataset_name})"
+
+    @property
+    def dataset_name(self) -> str:
+        return self.enum.__name__
 
     @property
     def difference(self) -> set[DependentVariables]:
@@ -126,11 +135,154 @@ class Dependencies:
     def metadata(self) -> Mapping[str, Any]:
         return self.enum.metadata  # type: ignore
 
-    # @property
-    # def name(self) -> str:
-    #     return self.enum.name
+
+# =====================================================================================================================
+# - Resampling
+# =====================================================================================================================
+class Mesoscale(Data[Array[[...], np.float_]]):
+    def __init__(
+        self,
+        dx: float = DEFAULT_DX,
+        dy: float | None = None,
+        *,
+        rate: float = DEFAULT_SCALE_RATE,
+        levels: ListLike[Number] = DEFAULT_LEVELS,
+        troposphere: ListLike[Number] | None = None,
+        xy_units: str = "km",
+        z_units: str = "hPa",
+    ) -> None:
+        if xy_units not in UNITS[X, Y]:
+            raise ValueError(f"units must be one of {UNITS[X, Y]}")
+        if z_units not in UNITS[Z]:
+            raise ValueError(f"units must be one of {UNITS[Z]}")
+
+        super().__init__()
+        # - descending pressure
+        tropo = np.asarray(
+            sort_unique(self._arange() if troposphere is None else troposphere, descending=True), dtype=np.float_
+        )
+        self._levels = lvls = np.asarray(sort_unique(levels, descending=True), dtype=np.float_)
+        if not all(np.isin(lvls, tropo)):
+            raise ValueError(f"pressure {lvls} must be a subset of troposphere {tropo}")
+
+        # - ascending scale
+        mask = np.isin(tropo, lvls)
+        self._scale = scale = log_scale(tropo, rate=rate)[::-1][mask]
+        self._dx, self._dy = scale[np.newaxis] * np.array([[dx], [dy or dx]])
+        self._units: DimensionsMapType[str] = {(X, Y): xy_units, Z: z_units}
+
+    @staticmethod
+    def _arange(
+        start: int = DEFAULT_LEVEL_START,
+        stop: int = DEFAULT_LEVEL_STOP,
+        step: int = DEFAULT_LEVEL_STEP,
+        *,
+        p0: float = DEFAULT_PRESSURE_BASE,
+        p1: float = DEFAULT_PRESSURE_TOP,
+    ) -> Sequence[float]:
+        return [p0, *range(start, stop, step), p1]
+
+    @classmethod
+    def arange(
+        cls,
+        dx: float = DEFAULT_DX,
+        dy: float | None = None,
+        start: int = DEFAULT_LEVEL_START,
+        stop: int = DEFAULT_LEVEL_STOP,
+        step: int = DEFAULT_LEVEL_STEP,
+        *,
+        p0: float = DEFAULT_PRESSURE_BASE,
+        p1: float = DEFAULT_PRESSURE_TOP,
+        rate: float = DEFAULT_SCALE_RATE,
+        levels: ListLike[Number] = DEFAULT_LEVELS,
+    ) -> Mesoscale:
+        return cls(dx, dy, rate=rate, levels=levels, troposphere=cls._arange(start, stop, step, p0=p0, p1=p1))
+
+    #  - properties - #
+    @property
+    def levels(self) -> Array[[N], np.float_]:
+        return self._levels
+
+    @property
+    def scale(self) -> Array[[N], np.float_]:
+        return self._scale
+
+    @property
+    def dx(self) -> Array[[N], np.float_]:
+        return self._dx
+
+    @property
+    def dy(self) -> Array[[N], np.float_]:
+        return self._dy
+
+    @property
+    def unit(self) -> DimensionsMapType[str]:
+        return self._units
+
+    @property
+    def data(self) -> Iterable[tuple[str, Array[[...], np.float_]]]:
+        yield from (
+            ("scale", self.scale),
+            ("levels", self.levels),
+            ("area_extent", self.area_extent),
+        )  # type: ignore
+
+    @property
+    def plot(self) -> display.PlotAccessor:
+        return display.PlotAccessor(self)
+
+    @property
+    def area_extent(self) -> Array[[N, N4], np.float_]:
+        xy = np.c_[self.dx, self.dy]
+        return np.c_[-xy, xy]
+
+    #  - array methods - #
+    def __array__(self) -> Array[[N, N4], np.float_]:
+        return self.area_extent
+
+    def to_numpy(self, *, units: Unit = "km") -> Array[[N, N4], np.float_]:
+        return self.area_extent * _units[units]
+
+    def to_pandas(self) -> pd.DataFrame:
+        df = pd.DataFrame(
+            np.asarray(self), columns=["dx0", "dy0", "dx1", "dy1"], index=pd.Index(self.levels, name="pressure")
+        )
+        df.insert(0, "scale", self.scale)
+        return df.sort_index()
+
+    def __repr__(self) -> str:
+        name = self.name
+        size = self.size
+        xy, z = self.unit.values()
+        return join_kv(
+            f"{name}({size=}):",
+            ("scale", self.scale),
+            (f"levels[{z}]", self.levels),
+            (f"extent[{xy}]", self.area_extent),
+        )
+
+    def __len__(self) -> int:
+        return len(self.levels)
+
+    # - methods - #
+    def get_domain(self, dsets: Iterable[DependentDataset]) -> Domain:
+        return Domain(dsets, self)
+
+    def resample(
+        self,
+        __x: Domain | Iterable[DependentDataset],
+        /,
+        *,
+        height: int = 80,
+        width: int = 80,
+        method: str = "nearest",
+    ) -> ReSampler:
+        return ReSampler(
+            __x if isinstance(__x, Domain) else self.get_domain(__x), height=height, width=width, method=method
+        )
 
 
+# =====================================================================================================================
 def is_dimension_independent(dims: Iterable[Hashable]) -> bool:
     return all(isinstance(dim, Dimensions) for dim in dims) and set(dims) == set(Dimensions)
 
@@ -231,33 +383,51 @@ class IndependentDataset(xr.Dataset):
     def lons(self) -> xr.DataArray:
         return self[LON]
 
+    def select_from(self, x: Mapping[Coordinates, Sequence[Any]]) -> Self:
+        return self.sel({k: self[k].isin(v) for k, v in x.items()})
+
+    @property
+    def grid_definition(self) -> GridDefinition:
+        if _GRID_DEFINITION_ATTRIBUTE not in self.attrs:
+            self.attrs[_GRID_DEFINITION_ATTRIBUTE] = self.get_grid_definition()
+        return self.attrs[_GRID_DEFINITION_ATTRIBUTE]
+
+    def get_grid_definition(self, nprocs: int = 1) -> GridDefinition:
+        # TODO: need to write a test for this and insure
+        # the lons are in the range of -180 to 180
+        lons, lats = (self[x].to_numpy() for x in (LON, LAT))
+        lons = (lons + 180.0) % 360 - 180.0
+        return GridDefinition(lons, lats, nprocs=nprocs)
+
+    def set_grid_definition(self, grid_definition: GridDefinition | None = None) -> Self:
+        self.attrs[_GRID_DEFINITION_ATTRIBUTE] = grid_definition or self.get_grid_definition()
+        return self
+
 
 class DependentDataset(IndependentDataset):
     __slots__ = ()
-    __dims__ = (T, Z, Y, X)
-    __coords__ = (TIME, LVL, LAT, LON)
 
     def __init__(
-        self, data: xr.Dataset, *, attrs: Mapping[str, Any] | None = None, depends: Depends | None = None
+        self,
+        data: xr.Dataset | Mapping[DependentVariables, xr.DataArray],
+        coords: Mapping[Any, Any] | None = None,
+        attrs: Mapping[str, Any] | None = None,
+        *,
+        depends: Depends | None = None,
     ) -> None:
         # TODO:
         # - add method to create the dataset from a 4/5d array
         if isinstance(data, DependentDataset) and attrs is None:
             attrs = {
-                _GRID_DEFINITION: data.grid_definition,
                 _DEPENDS: data.depends,
+                # we dont want to forward the grid definition
+                # because the dataset may have been sliced or something
+                # so we can't forward the definition
             }
-        super().__init__(data, attrs=attrs)
-        if depends is not None:  # TODO: these 2 conditionals can be consolidated
-            self.attrs[_DEPENDS] = depends
+        elif attrs is None and depends is not None:
+            attrs = {_DEPENDS: Dependencies(depends)}
 
-        if _GRID_DEFINITION not in self.attrs:
-            lons, lats = (self[x].to_numpy() for x in (LON, LAT))
-            lons = (lons + 180.0) % 360 - 180.0
-            # TODO: need to write a test for this and insure
-            # the lons are in the range of -180 to 180
-            self.attrs[_GRID_DEFINITION] = GridDefinition(lons, lats)
-        assert is_independent(self)
+        super().__init__(data, coords, attrs)
 
     @classmethod
     def from_zarr(cls, store: Any, depends: Depends) -> DependentDataset:
@@ -265,127 +435,28 @@ class DependentDataset(IndependentDataset):
         return cls.from_dependant(xr.open_zarr(store, drop_variables=depends.difference), depends=depends)
 
     @property
-    def grid_definition(self) -> GridDefinition:
-        return self.attrs[_GRID_DEFINITION]
-
-    @property
     def depends(self) -> Dependencies:
         return self.attrs[_DEPENDS]
 
+    def _repr_html_(self) -> str:
+        obj_type = f"{self.__class__.__name__}[{self.depends.dataset_name}]"
 
-# =====================================================================================================================
-# - Resampling
-# =====================================================================================================================
-class Mesoscale(Data[NDArray[np.float_]]):
-    def __init__(
-        self,
-        dx: float = DEFAULT_DX,
-        dy: float | None = None,
-        *,
-        rate: float = DEFAULT_SCALE_RATE,
-        levels: ListLike[Number] = DEFAULT_LEVELS,
-        troposphere: ListLike[Number] | None = None,
-    ) -> None:
-        super().__init__()
-        # - descending pressure
-        tropo = np.asarray(
-            sort_unique(self._arange() if troposphere is None else troposphere, descending=True), dtype=np.float_
-        )
-        self._levels = lvls = np.asarray(sort_unique(levels, descending=True), dtype=np.float_)
-        if not all(np.isin(lvls, tropo)):
-            raise ValueError(f"pressure {lvls} must be a subset of troposphere {tropo}")
+        header_components = [f"<div class='xr-obj-type'>{html.escape(obj_type)}</div>"]
 
-        # - ascending scale
-        mask = np.isin(tropo, lvls)
-        self._scale = scale = log_scale(tropo, rate=rate)[::-1][mask]
-        self._dx, self._dy = scale[np.newaxis] * np.array([[dx], [dy or dx]])
+        sections = [
+            xarray.core.formatting_html.dim_section(self),
+            xarray.core.formatting_html.coord_section(self.coords),
+            xarray.core.formatting_html.datavar_section(self.data_vars),
+        ]
 
-    @staticmethod
-    def _arange(
-        start: int = DEFAULT_LEVEL_START,
-        stop: int = DEFAULT_LEVEL_STOP,
-        step: int = DEFAULT_LEVEL_STEP,
-        *,
-        p0: float = DEFAULT_PRESSURE_BASE,
-        p1: float = DEFAULT_PRESSURE_TOP,
-    ) -> Sequence[float]:
-        return [p0, *range(start, stop, step), p1]
-
-    @classmethod
-    def arange(
-        cls,
-        dx: float = DEFAULT_DX,
-        dy: float | None = None,
-        start: int = DEFAULT_LEVEL_START,
-        stop: int = DEFAULT_LEVEL_STOP,
-        step: int = DEFAULT_LEVEL_STEP,
-        *,
-        p0: float = DEFAULT_PRESSURE_BASE,
-        p1: float = DEFAULT_PRESSURE_TOP,
-        rate: float = DEFAULT_SCALE_RATE,
-        levels: ListLike[Number] = DEFAULT_LEVELS,
-    ) -> Mesoscale:
-        return cls(dx, dy, rate=rate, levels=levels, troposphere=cls._arange(start, stop, step, p0=p0, p1=p1))
-
-    @property
-    def levels(self) -> Array[[N], np.float_]:
-        return self._levels
-
-    @property
-    def scale(self) -> Array[[N], np.float_]:
-        return self._scale
-
-    @property
-    def dx(self) -> Array[[N], np.float_]:
-        return self._dx
-
-    @property
-    def dy(self) -> Array[[N], np.float_]:
-        return self._dy
-
-    @property
-    def area_extent(self) -> Array[[N, N4], np.float_]:
-        xy = np.c_[self.dx, self.dy]
-        return np.c_[-xy, xy]
-
-    @property
-    def data(self) -> Iterable[tuple[str, NDArray[np.float_]]]:
-        yield from (("scale", self.scale), ("levels", self.levels), ("dx", self.dx), ("dy", self.dy))
-
-    def __array__(self) -> Array[[N, N2], np.float_]:
-        return self.to_numpy()
-
-    def __len__(self) -> int:
-        return len(self.levels)
-
-    def to_pandas(self) -> pd.DataFrame:
-        return pd.DataFrame(self.to_dict()).set_index("levels").sort_index()
-
-    def to_numpy(self, *, units: Unit = "km") -> Array[[N, N2], np.float_]:
-        xy = np.c_[self.dx, self.dy] * _units[units]
-        return np.c_[-xy, xy]
-
-    def intersection(self, *dsets: DependentDataset) -> DatasetIntersection:
-        return DatasetIntersection.from_datasets(dsets, self)
-
-    def resample(
-        self,
-        *dsets: DependentDataset,
-        height: int = 80,
-        width: int = 80,
-        target_projection: LiteralCRS = "lambert_azimuthal_equal_area",
-        method: str = "nearest",
-    ) -> ReSampler:
-        return ReSampler(
-            self.intersection(*dsets), height=height, width=width, target_projection=target_projection, method=method
-        )
+        return xarray.core.formatting_html._obj_repr(self, header_components, sections)
 
 
 # =====================================================================================================================
 #
 # =====================================================================================================================
-class DataProducer(DataWorker[TimeSlicePoint, Array[[N, N, N, N, N], np.float_]], AbstractIntersection):
-    def __init__(self, indices: Iterable[TimeSlicePoint], resampler: ReSampler) -> None:
+class DataProducer(DataWorker[PointOverTime, Array[[Nv, Nt, Nz, Ny, Nx], np.float_]], AbstractDomain):
+    def __init__(self, indices: Iterable[PointOverTime], resampler: ReSampler) -> None:
         super().__init__(indices, resampler=resampler)
 
     @functools.cached_property
@@ -393,16 +464,17 @@ class DataProducer(DataWorker[TimeSlicePoint, Array[[N, N, N, N, N], np.float_]]
         return self.attrs["resampler"]
 
     @property
-    def intersection(self) -> DatasetIntersection:
-        return self.sampler.intersection
+    def domain(self) -> Domain:
+        return self.sampler.domain
 
-    def __getitem__(self, idx: TimeSlicePoint) -> Array[[Nv, Nt, Nz, Ny, Nx], np.float_]:
-        time, (lon, lat) = idx
+    def __getitem__(self, idx: PointOverTime) -> Array[[Nv, Nt, Nz, Ny, Nx], np.float_]:
+        (lon, lat), time = idx
+
         return self.sampler(lon, lat, time)
 
-    def get_array(self, idx: TimeSlicePoint, /) -> xr.DataArray:
+    def get_array(self, idx: PointOverTime, /) -> xr.DataArray:
         data = self[idx]
-        time, _ = idx
+        _, time = idx
 
         return xr.DataArray(
             data,
@@ -410,201 +482,26 @@ class DataProducer(DataWorker[TimeSlicePoint, Array[[N, N, N, N, N], np.float_]]
             coords={
                 _VARIABLES: self.dvars[0],
                 LVL: (LVL.axis, self.levels),
-                TIME: (TIME.axis, self.slice_time(time)),
+                # TIME: (TIME.axis, self.slice_time(time)),
             },
         )
 
-    def get_dataset(self, idx: TimeSlicePoint, /) -> xr.Dataset:
+    def get_dataset(self, idx: PointOverTime, /) -> xr.Dataset:
         return self.get_array(idx).to_dataset(_VARIABLES)
 
 
 # =====================================================================================================================
 #  - functions
 # =====================================================================================================================
-def open_datasets(
-    paths: Iterable[tuple[str, Depends]], *, levels: ListLike[Number] | None = None
+def _open_datasets(
+    paths: CanBeItems[StrPath, Depends], *, levels: ListLike[Number] | None = None
 ) -> Iterable[DependentDataset]:
-    for path, depends in paths:
+    for path, depends in items(paths):
         ds = DependentDataset.from_zarr(path, depends)
         if levels is not None:
             ds = ds.sel({LVL: ds.level.isin(levels)})
         yield ds
 
 
-def create_resampler(
-    dsets: Iterable[DependentDataset],
-    dx: float = DEFAULT_DX,
-    dy: float | None = None,
-    start: int = DEFAULT_LEVEL_START,
-    stop: int = DEFAULT_LEVEL_STOP,
-    step: int = DEFAULT_LEVEL_STEP,
-    *,
-    p0: float = DEFAULT_PRESSURE_BASE,
-    p1: float = DEFAULT_PRESSURE_TOP,
-    rate: float = DEFAULT_SCALE_RATE,
-    levels: ListLike[Number] = DEFAULT_LEVELS,
-    height: int = DEFAULT_HEIGHT,
-    width: int = DEFAULT_WIDTH,
-    target_projection: LiteralCRS = DEFAULT_TARGET_PROJECTION,
-    method: str = DEFAULT_RESAMPLE_METHOD,
-) -> ReSampler:
-    return Mesoscale.arange(
-        dx=dx,
-        dy=dy,
-        start=start,
-        stop=stop,
-        step=step,
-        p0=p0,
-        p1=p1,
-        rate=rate,
-        levels=levels,
-    ).resample(*dsets, height=height, width=width, target_projection=target_projection, method=method)
-
-
-def data_producer(
-    dsets: Iterable[DependentDataset],
-    indices: Iterable[TimeSlicePoint] | Callable[[DatasetIntersection], Iterable[TimeSlicePoint]] = LinearSampler,
-    *,
-    dx: float = DEFAULT_DX,
-    dy: float | None = None,
-    start: int = DEFAULT_LEVEL_START,
-    stop: int = DEFAULT_LEVEL_STOP,
-    step: int = DEFAULT_LEVEL_STEP,
-    p0: float = DEFAULT_PRESSURE_BASE,
-    p1: float = DEFAULT_PRESSURE_TOP,
-    rate: float = DEFAULT_SCALE_RATE,
-    levels: ListLike[Number] = DEFAULT_LEVELS,
-    height: int = DEFAULT_HEIGHT,
-    width: int = DEFAULT_WIDTH,
-    target_projection: LiteralCRS = DEFAULT_TARGET_PROJECTION,
-    method: str = DEFAULT_RESAMPLE_METHOD,
-    **sampler_kwargs: Any,
-) -> DataProducer:
-    scale = Mesoscale.arange(
-        dx=dx,
-        dy=dy,
-        start=start,
-        stop=stop,
-        step=step,
-        p0=p0,
-        p1=p1,
-        rate=rate,
-        levels=levels,
-    )
-    resampler = scale.resample(*dsets, height=height, width=width, target_projection=target_projection, method=method)
-    if callable(indices):
-        indices = indices(resampler.intersection, **sampler_kwargs)
-
-    return DataProducer(indices, resampler=resampler)
-
-
-def data_generator(
-    paths: Iterable[tuple[str, Depends]],
-    indices: Iterable[TimeSlicePoint] | Callable[[DatasetIntersection], Iterable[TimeSlicePoint]] = LinearSampler,
-    *,
-    dx: float = 200,
-    dy: float | None = None,
-    start: int = 1000,
-    stop: int = 25 - 1,
-    step: int = -25,
-    p0: float = P0,
-    p1: float = P1,
-    rate: float = 1,
-    levels: ListLike[Number] = DEFAULT_LEVELS,
-    height: int = 80,
-    width: int = 80,
-    target_projection: LiteralCRS = "lambert_azimuthal_equal_area",
-    method: str = "nearest",
-    # - data consumer -
-    maxsize: int = 0,
-    timeout: float | None = None,
-    **sampler_kwargs: Any,
-) -> DataGenerator[Array[[N, N, N, N, N], np.float_]]:
-    datasets = open_datasets(paths, levels=levels)
-    producer = data_producer(
-        datasets,
-        indices,
-        dx=dx,
-        dy=dy,
-        start=start,
-        stop=stop,
-        step=step,
-        p0=p0,
-        p1=p1,
-        rate=rate,
-        levels=levels,
-        height=height,
-        width=width,
-        target_projection=target_projection,
-        method=method,
-        **sampler_kwargs,
-    )
-    return DataGenerator(producer, maxsize=maxsize, timeout=timeout)
-
-
-from . import _compat
-
-
-def data_loader(
-    paths: Iterable[tuple[str, Depends]],
-    indices: Iterable[TimeSlicePoint] | Callable[[DatasetIntersection], Iterable[TimeSlicePoint]] = LinearSampler,
-    *,
-    dx: float = 200,
-    dy: float | None = None,
-    start: int = 1000,
-    stop: int = 25 - 1,
-    step: int = -25,
-    p0: float = P0,
-    p1: float = P1,
-    rate: float = 1,
-    levels: ListLike[Number] = DEFAULT_LEVELS,
-    height: int = 80,
-    width: int = 80,
-    target_projection: LiteralCRS = "lambert_azimuthal_equal_area",
-    method: str = "nearest",
-    # - data consumer -
-    maxsize: int = 0,
-    timeout: float | None = None,
-    #
-    batch_size: int | None = 1,
-    shuffle: bool | None = None,
-    # sampler: Sampler[Unknown] | Iterable[Unknown] | None = None,
-    # batch_sampler: Sampler[List[Unknown]] | Iterable[List[Unknown]] | None = None,
-    num_workers: int = 0,
-    # collate_fn: _collate_fn_t[Unknown] | None = None,
-    pin_memory: bool = False,
-    drop_last: bool = False,
-    # timeout: float = 0,
-    **sampler_kwargs: Any,
-):
-    if not _compat._has_torch:
-        raise RuntimeError("torch is not installed!")
-    dataset = data_generator(
-        paths,
-        indices,
-        dx=dx,
-        dy=dy,
-        start=start,
-        stop=stop,
-        step=step,
-        p0=p0,
-        p1=p1,
-        rate=rate,
-        levels=levels,
-        height=height,
-        width=width,
-        target_projection=target_projection,
-        method=method,
-        maxsize=maxsize,
-        timeout=timeout,
-        **sampler_kwargs,
-    )
-    return _compat.DataLoader(
-        dataset,
-        batch_size=batch_size,
-        timeout=timeout or 0,
-        shuffle=shuffle,
-        num_workers=num_workers,
-        drop_last=drop_last,
-        pin_memory=pin_memory,
-    )
+def open_datasets(paths: CanBeItems[StrPath, Depends], *, levels: ListLike[Number] | None = None) -> DatasetSequence:
+    return DatasetSequence(_open_datasets(paths, levels=levels))
