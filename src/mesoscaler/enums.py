@@ -1,11 +1,7 @@
 """A mix of Abstract Base Classes and Generic Data Adapters for various data structures."""
 from __future__ import annotations
 
-import enum
-import functools
 from typing import Literal, Mapping, TypeVar
-
-import pyproj
 
 from ._metadata import DependentVariables, IndependentVariables, auto_field
 from ._typing import Literal, Mapping, TypeAlias, TypeVar
@@ -65,16 +61,16 @@ def unpack_coords() -> (
 COORDINATES = TIME, LVL, LAT, LON = unpack_coords()
 
 
-class CoordinateReferenceSystem(functools.partial, enum.Enum):
-    lambert_azimuthal_equal_area = laea = pyproj.CRS, {"proj": "laea"}
-    lambert_conformal_conic = lcc = pyproj.CRS, {"proj": "lcc"}
+# class CoordinateReferenceSystem(functools.partial, enum.Enum):
+#     lambert_azimuthal_equal_area = laea = pyproj.CRS, {"proj": "laea"}
+#     lambert_conformal_conic = lcc = pyproj.CRS, {"proj": "lcc"}
 
-    def from_point(self, longitude: float, latitude: float) -> pyproj.CRS:
-        return self(longitude=longitude, latitude=latitude)
+#     def from_point(self, lon: float, lat: float, /) -> pyproj.CRS:
+#         return self(lon_0=lon, lat_0=lat)
 
 
-LiteralProjection = Literal["laea", "lcc", "lambert_azimuthal_equal_area", "lambert_conformal_conic"]
-LiteralCRS = CoordinateReferenceSystem | LiteralProjection
+# LiteralProjection = Literal["laea", "lcc", "lambert_azimuthal_equal_area", "lambert_conformal_conic"]
+# LiteralCRS = CoordinateReferenceSystem | LiteralProjection
 
 
 class ERA5(DependentVariables):

@@ -16,6 +16,7 @@ from .._typing import (
     AnyArrayLike,
     AreaExtent,
     Array,
+    Callable,
     Iterable,
     Iterator,
     N,
@@ -36,7 +37,7 @@ from ..enums import (
     Y,
     Z,
 )
-from ..generic import Callable, DataSampler, DataSequence, Mapping, TypeVar
+from ..generic import DataSampler, DataSequence, Mapping, TypeVar
 from ..utils import repr_, slice_time
 
 _T = TypeVar("_T")
@@ -139,13 +140,10 @@ class DatasetSequence(DataSequence[DependentDataset]):
 
     def fit(self, x: AbstractDomain | Mesoscale, /) -> DatasetSequence:
         domain = x if isinstance(x, AbstractDomain) else self.get_domain(x)
-
+        # TODO: need to determine the intersection of the lon,lat based on the greatest extent
+        # | domain.bbox.intersect2d(ds[LON], ds[LAT])
         return DatasetSequence(
-            ds.sel(
-                {TIME: ds[TIME].isin(domain.time), LVL: ds[LVL].isin(domain.levels)}
-                | domain.bbox.intersect2d(ds[LON], ds[LAT])
-            ).set_grid_definition()
-            for ds in self
+            ds.sel({TIME: ds[TIME].isin(domain.time), LVL: ds[LVL].isin(domain.levels)}) for ds in self
         )
 
     def batch(self, x: Mapping[Coordinates, Iterable[Sequence[float | np.datetime64]]]) -> DatasetSequence:
@@ -155,6 +153,14 @@ class DatasetSequence(DataSequence[DependentDataset]):
 
     def _repr_html_(self) -> str:
         return "\n".join(ds._repr_html_() for ds in self)
+
+    def sel(self, time=None, levels=None) -> DatasetSequence:
+        keys = []  # type: list[tuple[str, Any]]
+        if time is not None:
+            keys.append((TIME, time))
+        if levels is not None:
+            keys.append((LVL, levels))
+        return DatasetSequence(ds.sel({key: ds[key].isin(value)}) for ds in self for key, value in keys)
 
 
 class AbstractDomain(abc.ABC):
@@ -188,7 +194,7 @@ class AbstractDomain(abc.ABC):
     # - AreaExtent -
     @property
     def area_extents(self) -> Array[[N, N4], np.float_]:
-        return self.domain._area_extents
+        return self.scale.to_numpy(units="m")
 
     #  - TimeSlice -
     @property
@@ -308,11 +314,14 @@ class Domain(AbstractDomain):
             self._dvars,
             self._area_extents,
             self._datasets,
+            self._scale,
         ) = _get_intersection(datasets, scale)
-        self._scale = scale
 
         self._datasets = DatasetSequence(
-            ds.sel({LVL: [lvl]}) for lvl in self._levels for ds in self._datasets if lvl in ds.level
+            ds.sel({LVL: [lvl]}).set_grid_definition(grid)
+            for lvl in self._levels
+            for (ds, grid) in ((ds, ds.get_grid_definition()) for ds in self._datasets)
+            if lvl in ds.level
         )
 
     def __repr__(self) -> str:
@@ -337,13 +346,14 @@ def _get_intersection(
     Array[[N, N], np.str_],
     Array[[N, N4], np.float_],
     DatasetSequence,
+    Mesoscale,
 ]:
     dsets = DatasetSequence(dsets)
     coords = dsets.get_coordinates()
 
     # - Z
     levels = np.concatenate(coords[LVL])
-
+    levels = np.sort(levels[np.isin(levels, scale.levels)])[::-1]  # descending,
     # - T
     time = utils.overlapping(coords[TIME], sort=True)  # type: Array[[N], np.datetime64]
     dsets = DatasetSequence(ds.sel({TIME: ds.time.isin(time)}) for ds in dsets)
@@ -357,10 +367,11 @@ def _get_intersection(
         BoundingBox(x0, y0, x1, y1),
         np.s_[min_time:max_time],
         time,
-        np.sort(levels[np.isin(levels, scale.levels)])[::-1],  # descending,
+        levels,
         np.stack([list(ds.data_vars) for ds in dsets]),
         scale.area_extent * 1000.0,  # km -> m
         dsets,
+        scale,
     )
 
 

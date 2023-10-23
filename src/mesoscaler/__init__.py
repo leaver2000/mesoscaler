@@ -24,6 +24,7 @@ from .sampling.domain import DatasetSequence, Domain
 from .sampling.resampler import ReSampler
 from .sampling.sampler import AreaOfInterestSampler, LinearSampler
 from .time64 import (
+    Time64,
     days,
     hours,
     microseconds,
@@ -74,7 +75,8 @@ __all__ = [
     "utils",
     # - create -
     "create",
-    # - datetime64 -
+    # - time64 -
+    "Time64",
     "years",
     "months",
     "days",

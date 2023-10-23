@@ -33,7 +33,6 @@ from ._compat import (  # noqa
 )
 from ._typing import (
     Any,
-    Callable,
     Final,
     Generic,
     Hashable,
@@ -121,7 +120,7 @@ class DataSampler(NamedAndSized, Iterable[_T1], Sampler[_T1], abc.ABC):
 class DataSequence(NamedAndSized, Sequence[_T1]):
     def __init__(self, data: Iterable[_T1]) -> None:
         super().__init__()
-        self._data = data
+        self._data = tuple(data)
 
     @property
     def data(self) -> tuple[_T1, ...]:
@@ -153,17 +152,6 @@ class DataSequence(NamedAndSized, Sequence[_T1]):
         size = self.size
         text = "\n".join(repr_(x) for x in self.data)
         return f"{name}({size=})[\n{text}\n]"
-
-    @overload
-    def map(self, func: Callable[[_T1], _T1]) -> Self:
-        ...
-
-    @overload
-    def map(self, func: Callable[[_T1], _T2]) -> DataSequence[_T2]:
-        ...
-
-    def map(self, func: Callable[[_T1], _T1] | Callable[[_T1], _T2]) -> Self | DataSequence[_T2]:
-        return self.__class__(map(func, self.data))
 
 
 # =====================================================================================================================

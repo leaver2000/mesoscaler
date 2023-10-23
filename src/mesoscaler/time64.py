@@ -1,3 +1,8 @@
+"""
+This module combines the functionality of the `np.datetime64` and `np.timedelta64` dtypes into a single `Time64` enum
+where each member represents a specific unit of time. This allows for a more intuitive and consistent API for
+representing time and time deltas in NumPy arrays.
+"""
 from __future__ import annotations
 
 import datetime
@@ -60,20 +65,19 @@ Time64Like: TypeAlias = Union[
     TimeDelta64UnitLiteral,
 ]
 
-
-_auto_frequency = lambda x: auto_field(x, aliases=[f"datetime64[{x}]", f"timedelta64[{x}]"])
+_auto_time = lambda x: auto_field(x, aliases=[f"datetime64[{x}]", f"timedelta64[{x}]"])
 
 
 class Time64(str, VariableEnum):
-    years = _auto_frequency("Y")
-    months = _auto_frequency("M")
-    days = _auto_frequency("D")
-    hours = _auto_frequency("h")
-    minutes = _auto_frequency("m")
-    seconds = _auto_frequency("s")
-    milliseconds = _auto_frequency("ms")
-    microseconds = _auto_frequency("us")
-    nanoseconds = _auto_frequency("ns")
+    years = _auto_time("Y")
+    months = _auto_time("M")
+    days = _auto_time("D")
+    hours = _auto_time("h")
+    minutes = _auto_time("m")
+    seconds = _auto_time("s")
+    milliseconds = _auto_time("ms")
+    microseconds = _auto_time("us")
+    nanoseconds = _auto_time("ns")
 
     @classmethod
     def _missing_(cls, value) -> Time64:
@@ -153,6 +157,8 @@ class Time64(str, VariableEnum):
             __x = datetime.datetime(__x, *args)
         return np.datetime64(__x, self)
 
+
+del _auto_time
 
 years, months, days, hours, minutes, seconds, milliseconds, microseconds, nanoseconds = (
     Time64.years,

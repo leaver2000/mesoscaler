@@ -219,12 +219,12 @@ List: TypeAlias = list[_T | Any]
 TensorLike: TypeAlias = Union[Array[_P, _T_co], NDArray[_T_co]]
 
 # - NewType
-N: TypeAlias = Any
-Nv: TypeAlias = N
-Nt: TypeAlias = N
-Nz: TypeAlias = N
-Ny: TypeAlias = N
-Nx: TypeAlias = N
+N = NewType("N", int)
+Nv = NewType("Nv", int)
+Nt = NewType("Nt", int)
+Nz = NewType("Nz", int)
+Ny = NewType("Ny", int)
+Nx = NewType("Nx", int)
 N1 = NewType("1", int)
 N2 = NewType("2", int)
 N3 = NewType("3", int)

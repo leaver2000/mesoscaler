@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-import datetime
 import functools
+import html
 
 import numpy as np
 import pandas as pd
@@ -11,11 +11,11 @@ import xarray.core.formatting_html
 from pyresample.geometry import GridDefinition
 from xarray.core.coordinates import DatasetCoordinates
 
+from . import display
 from ._typing import (
     N4,
     Any,
     Array,
-    ArrayLike,
     CanBeItems,
     Final,
     Hashable,
@@ -47,19 +47,16 @@ from .enums import (
     DependentVariables,
     Dimensions,
     DimensionsMapType,
-    LiteralCRS,
     T,
-    TypeVar,
     X,
     Y,
     Z,
 )
-from .generic import Data, DataSequence, DataWorker
+from .generic import Data, DataWorker
 from .sampling.domain import UNITS, AbstractDomain, DatasetSequence, Domain
 from .sampling.resampler import ReSampler
 from .utils import items, join_kv, log_scale, sort_unique
 
-_T = TypeVar("_T")
 Depends: TypeAlias = Union[type[DependentVariables], DependentVariables, Sequence[DependentVariables], "Dependencies"]
 Unit = Literal["km", "m"]
 # =====================================================================================================================
@@ -87,11 +84,6 @@ _units: Mapping[Unit, float] = {"km": 1.0, "m": 1000.0}
 _VARIABLES = "variables"
 _GRID_DEFINITION_ATTRIBUTE = "grid_definition"
 _DEPENDS = "depends"
-
-CoordinateValue: TypeAlias = (
-    ListLike[float | np.datetime64 | datetime.datetime | str] | ArrayLike[np.float_ | np.datetime64]
-)
-DataValue: TypeAlias = ArrayLike | xr.DataArray | xr.Dataset
 
 
 # =====================================================================================================================
@@ -206,6 +198,7 @@ class Mesoscale(Data[Array[[...], np.float_]]):
     ) -> Mesoscale:
         return cls(dx, dy, rate=rate, levels=levels, troposphere=cls._arange(start, stop, step, p0=p0, p1=p1))
 
+    #  - properties - #
     @property
     def levels(self) -> Array[[N], np.float_]:
         return self._levels
@@ -235,15 +228,27 @@ class Mesoscale(Data[Array[[...], np.float_]]):
         )  # type: ignore
 
     @property
+    def plot(self) -> display.PlotAccessor:
+        return display.PlotAccessor(self)
+
+    @property
     def area_extent(self) -> Array[[N, N4], np.float_]:
         xy = np.c_[self.dx, self.dy]
         return np.c_[-xy, xy]
 
+    #  - array methods - #
     def __array__(self) -> Array[[N, N4], np.float_]:
         return self.area_extent
 
     def to_numpy(self, *, units: Unit = "km") -> Array[[N, N4], np.float_]:
         return self.area_extent * _units[units]
+
+    def to_pandas(self) -> pd.DataFrame:
+        df = pd.DataFrame(
+            np.asarray(self), columns=["dx0", "dy0", "dx1", "dy1"], index=pd.Index(self.levels, name="pressure")
+        )
+        df.insert(0, "scale", self.scale)
+        return df.sort_index()
 
     def __repr__(self) -> str:
         name = self.name
@@ -259,19 +264,21 @@ class Mesoscale(Data[Array[[...], np.float_]]):
     def __len__(self) -> int:
         return len(self.levels)
 
+    # - methods - #
     def get_domain(self, dsets: Iterable[DependentDataset]) -> Domain:
         return Domain(dsets, self)
 
     def resample(
         self,
-        *dsets: DependentDataset,
+        __x: Domain | Iterable[DependentDataset],
+        /,
+        *,
         height: int = 80,
         width: int = 80,
-        target_projection: LiteralCRS = "lambert_azimuthal_equal_area",
         method: str = "nearest",
     ) -> ReSampler:
         return ReSampler(
-            self.get_domain(dsets), height=height, width=width, target_projection=target_projection, method=method
+            __x if isinstance(__x, Domain) else self.get_domain(__x), height=height, width=width, method=method
         )
 
 
@@ -379,29 +386,48 @@ class IndependentDataset(xr.Dataset):
     def select_from(self, x: Mapping[Coordinates, Sequence[Any]]) -> Self:
         return self.sel({k: self[k].isin(v) for k, v in x.items()})
 
+    @property
+    def grid_definition(self) -> GridDefinition:
+        if _GRID_DEFINITION_ATTRIBUTE not in self.attrs:
+            self.attrs[_GRID_DEFINITION_ATTRIBUTE] = self.get_grid_definition()
+        return self.attrs[_GRID_DEFINITION_ATTRIBUTE]
+
+    def get_grid_definition(self, nprocs: int = 1) -> GridDefinition:
+        # TODO: need to write a test for this and insure
+        # the lons are in the range of -180 to 180
+        lons, lats = (self[x].to_numpy() for x in (LON, LAT))
+        lons = (lons + 180.0) % 360 - 180.0
+        return GridDefinition(lons, lats, nprocs=nprocs)
+
+    def set_grid_definition(self, grid_definition: GridDefinition | None = None) -> Self:
+        self.attrs[_GRID_DEFINITION_ATTRIBUTE] = grid_definition or self.get_grid_definition()
+        return self
+
 
 class DependentDataset(IndependentDataset):
-    __slots__ = ("_grid_definition",)
-    __dims__ = (T, Z, Y, X)
-    __coords__ = (TIME, LVL, LAT, LON)
-    _grid_definition: GridDefinition | None
+    __slots__ = ()
 
     def __init__(
         self,
         data: xr.Dataset | Mapping[DependentVariables, xr.DataArray],
-        *,
+        coords: Mapping[Any, Any] | None = None,
         attrs: Mapping[str, Any] | None = None,
+        *,
         depends: Depends | None = None,
     ) -> None:
         # TODO:
         # - add method to create the dataset from a 4/5d array
         if isinstance(data, DependentDataset) and attrs is None:
-            attrs = {_DEPENDS: data.depends}
+            attrs = {
+                _DEPENDS: data.depends,
+                # we dont want to forward the grid definition
+                # because the dataset may have been sliced or something
+                # so we can't forward the definition
+            }
         elif attrs is None and depends is not None:
             attrs = {_DEPENDS: Dependencies(depends)}
 
-        super().__init__(data, attrs=attrs)
-        self._grid_definition = None
+        super().__init__(data, coords, attrs)
 
     @classmethod
     def from_zarr(cls, store: Any, depends: Depends) -> DependentDataset:
@@ -412,26 +438,8 @@ class DependentDataset(IndependentDataset):
     def depends(self) -> Dependencies:
         return self.attrs[_DEPENDS]
 
-    @property
-    def grid_definition(self) -> GridDefinition:
-        if self._grid_definition is None:
-            self._grid_definition = self.get_grid_definition()
-        return self._grid_definition
-
-    def set_grid_definition(self, nprocs: int = 1) -> DependentDataset:
-        self._grid_definition = self.get_grid_definition(nprocs=nprocs)
-        return self
-
-    def get_grid_definition(self, nprocs: int = 1) -> GridDefinition:
-        # TODO: need to write a test for this and insure
-        # the lons are in the range of -180 to 180
-        lons, lats = (self[x].to_numpy() for x in (LON, LAT))
-        lons = (lons + 180.0) % 360 - 180.0
-        return GridDefinition(lons, lats, nprocs=nprocs)
-
     def _repr_html_(self) -> str:
         obj_type = f"{self.__class__.__name__}[{self.depends.dataset_name}]"
-        import html
 
         header_components = [f"<div class='xr-obj-type'>{html.escape(obj_type)}</div>"]
 
@@ -485,8 +493,6 @@ class DataProducer(DataWorker[PointOverTime, Array[[Nv, Nt, Nz, Ny, Nx], np.floa
 # =====================================================================================================================
 #  - functions
 # =====================================================================================================================
-
-
 def _open_datasets(
     paths: CanBeItems[StrPath, Depends], *, levels: ListLike[Number] | None = None
 ) -> Iterable[DependentDataset]:
@@ -497,7 +503,5 @@ def _open_datasets(
         yield ds
 
 
-def open_datasets(
-    paths: CanBeItems[StrPath, Depends], *, levels: ListLike[Number] | None = None
-) -> DataSequence[DependentDataset]:
+def open_datasets(paths: CanBeItems[StrPath, Depends], *, levels: ListLike[Number] | None = None) -> DatasetSequence:
     return DatasetSequence(_open_datasets(paths, levels=levels))

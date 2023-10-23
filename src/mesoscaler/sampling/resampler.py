@@ -3,10 +3,12 @@ from __future__ import annotations
 import functools
 
 import numpy as np
+import pyproj
 import pyresample.geometry
 from pyresample.geometry import AreaDefinition, GridDefinition
 
 from .._typing import (
+    N4,
     Any,
     Array,
     Callable,
@@ -19,16 +21,16 @@ from .._typing import (
     Nx,
     Ny,
     Nz,
+    Sequence,
     TimeSlice,
 )
-from ..enums import TIME, CoordinateReferenceSystem, LiteralCRS, X, Y
-from ..utils import area_definition
+from ..enums import TIME, X, Y
 from .domain import AbstractDomain, DatasetAndExtent, Domain
 
 
 def _get_resample_method(
     method: str,
-    radius_of_influence=500000,
+    radius_of_influence=100_000,
     fill_value=0,
     reduce_data=True,
     nprocs=1,
@@ -57,6 +59,34 @@ def _get_resample_method(
     return functools.partial(func, **kwargs)
 
 
+def area_definition(
+    width: float,
+    height: float,
+    projection: pyproj.CRS | dict[str, Any],
+    area_extent: Array[[N4], np.float_] | Sequence,
+    lons: Array[[...], np.float_] | None = None,
+    lats: Array[[...], np.float_] | None = None,
+    dtype: Any = np.float_,
+    area_id: str = "undefined",
+    description: str = "undefined",
+    proj_id: str = "undefined",
+    nprocs: int = 1,
+) -> pyresample.geometry.AreaDefinition:
+    return pyresample.geometry.AreaDefinition(
+        area_id,
+        description,
+        proj_id,
+        width=width,
+        height=height,
+        projection=projection,
+        area_extent=area_extent,
+        lons=lons,
+        lats=lats,
+        dtype=dtype,
+        nprocs=nprocs,
+    )
+
+
 class ReSampler(AbstractDomain):
     # There are alot of callbacks and partial methods in this class.
     @property
@@ -70,7 +100,6 @@ class ReSampler(AbstractDomain):
         *,
         height: int = 80,
         width: int = 80,
-        target_projection: LiteralCRS = "lambert_azimuthal_equal_area",
         method: str = "nearest",
         sigmas=[1.0],
         radius_of_influence: int = 500000,
@@ -84,9 +113,6 @@ class ReSampler(AbstractDomain):
         self._domain = domain
         self.height = height
         self.width = width
-        self.target_projection = (
-            CoordinateReferenceSystem[target_projection] if isinstance(target_projection, str) else target_projection
-        )
 
         self._resample_method = _get_resample_method(
             method,
@@ -104,7 +130,7 @@ class ReSampler(AbstractDomain):
             area_definition,
             width=self.width,
             height=self.height,
-            projection=self.target_projection.from_point(longitude, latitude),
+            projection={"proj": "leac", "lon_0": longitude, "lat_0": latitude},
         )
 
     def _resample_point_over_time(

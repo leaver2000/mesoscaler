@@ -24,6 +24,8 @@ from ._typing import (
     TypeVar,
 )
 
+_T = TypeVar("_T")
+_Item: TypeAlias = np.generic | bool | int | float | complex | str | bytes | memoryview | enum.Enum | Hashable
 _ENUM_DICT_RESERVED_KEYS = (
     "__doc__",
     "__module__",
@@ -41,8 +43,6 @@ _MEMBER_METADATA = "__metadata_member_data__"
 _MEMBER_ALIASES = "__metadata_member_aliases__"
 _MEMBER_SERIES = "__metadata_series__"
 
-_T = TypeVar("_T")
-_Item: TypeAlias = np.generic | bool | int | float | complex | str | bytes | memoryview | enum.Enum | Hashable
 MemberMetadata: TypeAlias = MutableMapping[str, Any]
 
 
@@ -125,21 +125,17 @@ def _repack_info(
         {name: list(dict.fromkeys(metadata[name].pop(_MEMBER_ALIASES, []))) for name in index}, orient="index"
     ).T
 
+    member_series = pd.Series(list(member_map.values()), index=index, dtype=pd.CategoricalDtype(), name=name)
     member_metadata = types.MappingProxyType(collections.defaultdict(dict, metadata))
-    member_series = pd.Series(
-        list(member_map.values()),
-        index=index,
-        dtype=pd.CategoricalDtype(),
-        name=name,
-    )
+
     return types.MappingProxyType(
         {
             "name": name,
             _CLASS_METADATA: class_metadata,
             _CLASS_LOC: _Loc(member_series),
-            _MEMBER_METADATA: member_metadata,
             _MEMBER_ALIASES: aliases,
             _MEMBER_SERIES: member_series,
+            _MEMBER_METADATA: member_metadata,
         }
     )
 
@@ -209,7 +205,7 @@ class _EnumMetaCls(enum.EnumMeta):
         return cls.__metadata__[_CLASS_METADATA]
 
     @property
-    def loc(cls) -> _Loc[list[VariableEnum]]:
+    def loc(cls) -> _Loc[enum.Enum]:
         return cls.__metadata__[_CLASS_LOC]
 
     @property

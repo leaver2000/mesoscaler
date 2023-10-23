@@ -148,15 +148,15 @@ class AreaOfInterestSampler(TimeSampler):
         lon_lat_frequency: int = 5,
         time_frequency: time64.Time64Like = time64.Time64("hours"),
         time_step: int = 1,
-        aio: tuple[float, float, float, float] | AreaExtent = (-120, 30.0, -70, 25.0),
+        aoi: tuple[float, float, float, float] | AreaExtent = (-120, 30.0, -70, 25.0),
     ) -> None:
         super().__init__(domain, time_frequency=time_frequency, time_step=time_step)
-        self.aio = aio
+        self.aoi = aoi
         self.lon_lat_frequency = lon_lat_frequency
 
     def get_lon_lats(self) -> tuple[Array[[N], np.float_], Array[[N], np.float_]]:
         frequency = self.lon_lat_frequency
-        x_min, y_min, x_max, y_max = self.aio
+        x_min, y_min, x_max, y_max = self.aoi
         if self.domain.min_lat > y_min or self.domain.max_lat < y_max:
             raise ValueError(f"area_extent latitude bounds {y_min, y_max} are outside dataset bounds")
         elif self.domain.min_lon > x_min or self.domain.max_lon < x_max:

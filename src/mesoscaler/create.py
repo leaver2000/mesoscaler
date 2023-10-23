@@ -40,7 +40,6 @@ from .core import (
     DEFAULT_PRESSURE_TOP,
     DEFAULT_RESAMPLE_METHOD,
     DEFAULT_SCALE_RATE,
-    DEFAULT_TARGET_PROJECTION,
     DEFAULT_WIDTH,
     STANDARD_SURFACE_PRESSURE,
     DataProducer,
@@ -56,7 +55,6 @@ from .enums import (
     TIME,
     Coordinates,
     DependentVariables,
-    LiteralCRS,
     T,
     X,
     Y,
@@ -189,7 +187,6 @@ def resampler(
     levels: ListLike[Number] = DEFAULT_LEVELS,
     height: int = DEFAULT_HEIGHT,
     width: int = DEFAULT_WIDTH,
-    target_projection: LiteralCRS = DEFAULT_TARGET_PROJECTION,
     method: str = DEFAULT_RESAMPLE_METHOD,
 ) -> ReSampler:
     return Mesoscale.arange(
@@ -202,7 +199,7 @@ def resampler(
         p1=p1,
         rate=rate,
         levels=levels,
-    ).resample(*dsets, height=height, width=width, target_projection=target_projection, method=method)
+    ).resample(dsets, height=height, width=width, method=method)
 
 
 def producer(
@@ -220,7 +217,6 @@ def producer(
     levels: ListLike[Number] = DEFAULT_LEVELS,
     height: int = DEFAULT_HEIGHT,
     width: int = DEFAULT_WIDTH,
-    target_projection: LiteralCRS = DEFAULT_TARGET_PROJECTION,
     method: str = DEFAULT_RESAMPLE_METHOD,
     **sampler_kwargs: Any,
 ) -> DataProducer:
@@ -235,7 +231,7 @@ def producer(
         rate=rate,
         levels=levels,
     )
-    resampler = scale.resample(*dsets, height=height, width=width, target_projection=target_projection, method=method)
+    resampler = scale.resample(dsets, height=height, width=width, method=method)
     if callable(indices):
         indices = indices(resampler.domain, **sampler_kwargs)
 
@@ -257,7 +253,6 @@ def generator(
     levels: ListLike[Number] = DEFAULT_LEVELS,
     height: int = DEFAULT_HEIGHT,
     width: int = DEFAULT_WIDTH,
-    target_projection: LiteralCRS = DEFAULT_TARGET_PROJECTION,
     method: str = DEFAULT_RESAMPLE_METHOD,
     # - data consumer -
     maxsize: int = 0,
@@ -279,7 +274,7 @@ def generator(
         levels=levels,
         height=height,
         width=width,
-        target_projection=target_projection,
+        # target_projection=target_projection,
         method=method,
         **sampler_kwargs,
     )
@@ -301,7 +296,6 @@ def loader(
     levels: ListLike[Number] = DEFAULT_LEVELS,
     height: int = 80,
     width: int = 80,
-    target_projection: LiteralCRS = "lambert_azimuthal_equal_area",
     method: str = "nearest",
     # - data consumer -
     maxsize: int = 0,
@@ -330,7 +324,6 @@ def loader(
         levels=levels,
         height=height,
         width=width,
-        target_projection=target_projection,
         method=method,
         maxsize=maxsize,
         timeout=timeout,
