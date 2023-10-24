@@ -44,8 +44,8 @@ class _Loc(Generic[_T]):
     def __getitem__(self, item: list[str] | list[bool]) -> list[_T]: ...
 
 class VariableEnum(enum.Enum, metaclass=_EnumMetaCls):
-    @property  # type: ignore
     @classmethod
+    @property  # type: ignore
     def loc(cls) -> _Loc[Self]: ...
     @property
     def metadata(self) -> MutableMapping[str, Any]: ...

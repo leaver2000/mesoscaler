@@ -239,4 +239,4 @@ AreaExtent: TypeAlias = Array[[N4], np.float_]
 Longitude: TypeAlias = float
 Latitude: TypeAlias = float
 Point: TypeAlias = tuple[Longitude, Latitude]
-PointOverTime: TypeAlias = tuple[Point, TimeSlice | Array[[N], np.datetime64]]
+PointOverTime: TypeAlias = tuple[Point, Array[[N], np.datetime64]]

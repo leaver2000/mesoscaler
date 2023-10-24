@@ -20,8 +20,10 @@ from ._typing import (
     Final,
     Hashable,
     Iterable,
+    Latitude,
     ListLike,
     Literal,
+    Longitude,
     Mapping,
     N,
     Nt,
@@ -53,8 +55,8 @@ from .enums import (
     Z,
 )
 from .generic import Data, DataWorker
-from .sampling.domain import UNITS, AbstractDomain, DatasetSequence, Domain
-from .sampling.resampler import ReSampler
+from .sampling.domain import UNITS, DatasetSequence, Domain
+from .sampling.resampler import AbstractResampler, ReSampler
 from .utils import items, join_kv, log_scale, sort_unique
 
 Depends: TypeAlias = Union[type[DependentVariables], DependentVariables, Sequence[DependentVariables], "Dependencies"]
@@ -80,7 +82,7 @@ DERIVED_SURFACE_COORDINATE = {LVL: (LVL.axis, [STANDARD_SURFACE_PRESSURE])}
 or near surface parameter. The vertical coordinate is then set to the standard surface pressure of 1013.25 hPa."""
 
 _units: Mapping[Unit, float] = {"km": 1.0, "m": 1000.0}
-_VARIABLES = "variables"
+
 _GRID_DEFINITION_ATTRIBUTE = "grid_definition"
 _DEPENDS = "depends"
 
@@ -280,6 +282,45 @@ class Mesoscale(Data[Array[[...], np.float_]]):
             __x if isinstance(__x, Domain) else self.get_domain(__x), height=height, width=width, method=method
         )
 
+    def produce(
+        self,
+        __x: Domain | Iterable[DependentDataset],
+        indices: Iterable[PointOverTime],
+        /,
+        *,
+        height: int = 80,
+        width: int = 80,
+        method: str = "nearest",
+    ):
+        resampler = self.resample(__x, height=height, width=width, method=method)
+        return DataProducer(indices, resampler=resampler)
+
+
+# =====================================================================================================================
+class DataProducer(DataWorker[PointOverTime, Array[[Nv, Nt, Nz, Ny, Nx], np.float_]], AbstractResampler):
+    def __init__(self, indices: Iterable[PointOverTime], resampler: ReSampler) -> None:
+        super().__init__(indices, resampler=resampler)
+
+    @functools.cached_property
+    def resampler(self) -> ReSampler:
+        return self.attrs["resampler"]
+
+    # - AbstractDomain - #
+    @property
+    def domain(self) -> Domain:
+        return self.resampler.domain
+
+    # - AbstractReSampler - #
+    def vstack(
+        self, longitude: Longitude, latitude: Latitude, time: Array[[N], np.datetime64]
+    ) -> Array[[Nz, Ny, Nx, Nv | Nt], np.float_]:
+        return self.resampler.vstack(longitude, latitude, time)
+
+    # - Mapping Interface - #
+    def __getitem__(self, idx: PointOverTime) -> Array[[Nv, Nt, Nz, Ny, Nx], np.float_]:
+        (lon, lat), time = idx
+        return self(lon, lat, time)
+
 
 # =====================================================================================================================
 def is_dimension_independent(dims: Iterable[Hashable]) -> bool:
@@ -449,44 +490,6 @@ class DependentDataset(IndependentDataset):
         ]
 
         return xarray.core.formatting_html._obj_repr(self, header_components, sections)
-
-
-# =====================================================================================================================
-#
-# =====================================================================================================================
-class DataProducer(DataWorker[PointOverTime, Array[[Nv, Nt, Nz, Ny, Nx], np.float_]], AbstractDomain):
-    def __init__(self, indices: Iterable[PointOverTime], resampler: ReSampler) -> None:
-        super().__init__(indices, resampler=resampler)
-
-    @functools.cached_property
-    def sampler(self) -> ReSampler:
-        return self.attrs["resampler"]
-
-    @property
-    def domain(self) -> Domain:
-        return self.sampler.domain
-
-    def __getitem__(self, idx: PointOverTime) -> Array[[Nv, Nt, Nz, Ny, Nx], np.float_]:
-        (lon, lat), time = idx
-
-        return self.sampler(lon, lat, time)
-
-    def get_array(self, idx: PointOverTime, /) -> xr.DataArray:
-        data = self[idx]
-        _, time = idx
-
-        return xr.DataArray(
-            data,
-            dims=(_VARIABLES, T, Z, Y, X),
-            coords={
-                _VARIABLES: self.dvars[0],
-                LVL: (LVL.axis, self.levels),
-                # TIME: (TIME.axis, self.slice_time(time)),
-            },
-        )
-
-    def get_dataset(self, idx: PointOverTime, /) -> xr.Dataset:
-        return self.get_array(idx).to_dataset(_VARIABLES)
 
 
 # =====================================================================================================================

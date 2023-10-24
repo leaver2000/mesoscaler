@@ -60,6 +60,21 @@ CoordinateValue: TypeAlias = (
 DataValue: TypeAlias = ArrayLike | xr.DataArray | xr.Dataset | DependentDataset
 
 
+def _open_datasets(
+    datasets: Iterable[DependentDataset] | CanBeItems[StrPath, Depends], **kwargs: Any
+) -> DatasetSequence:
+    if isinstance(datasets, DatasetSequence):
+        return datasets
+
+    dsets = list(datasets)
+    if not dsets:
+        raise ValueError("datasets is empty")
+    if all(isinstance(x, DependentDataset) for x in dsets):
+        return DatasetSequence(dsets)  # type: ignore
+
+    return open_datasets(dsets, **kwargs)  # type: ignore
+
+
 @overload
 def coordinates(**kwargs: CoordinateValue) -> xr.Coordinates:
     ...
@@ -149,8 +164,12 @@ def dataset(
     elif not isinstance(__coordinates, xr.Coordinates):
         __coordinates = coordinates(__coordinates)
 
-    return DependentDataset(
-        {key: data_array(data, __coordinates) for key, data in __data.items()}, depends=list(__data.keys())
+    return (
+        DependentDataset(
+            {key: data_array(data, __coordinates) for key, data in __data.items()}, depends=list(__data.keys())
+        )
+        .set_xindex(LVL)
+        .set_xindex(TIME)
     )
 
 
@@ -163,7 +182,7 @@ def dataset_sequence(
 
 
 def resampler(
-    dsets: Iterable[DependentDataset],
+    dsets: Iterable[DependentDataset] | CanBeItems[StrPath, Depends],
     dx: float = DEFAULT_DX,
     dy: float | None = None,
     start: int = DEFAULT_LEVEL_START,
@@ -178,21 +197,13 @@ def resampler(
     width: int = DEFAULT_WIDTH,
     method: str = DEFAULT_RESAMPLE_METHOD,
 ) -> ReSampler:
-    return Mesoscale.arange(
-        dx=dx,
-        dy=dy,
-        start=start,
-        stop=stop,
-        step=step,
-        p0=p0,
-        p1=p1,
-        rate=rate,
-        levels=levels,
-    ).resample(dsets, height=height, width=width, method=method)
+    scale = Mesoscale.arange(dx, dy, start, stop, step, p0=p0, p1=p1, rate=rate, levels=levels)
+    dsets = _open_datasets(dsets, levels=levels).fit(scale)
+    return scale.resample(dsets, height=height, width=width, method=method)
 
 
 def producer(
-    dsets: Iterable[DependentDataset],
+    dsets: Iterable[DependentDataset] | CanBeItems[StrPath, Depends],
     indices: Iterable[PointOverTime] | Callable[[Domain], Iterable[PointOverTime]] = LinearSampler,
     *,
     dx: float = DEFAULT_DX,
@@ -207,28 +218,36 @@ def producer(
     height: int = DEFAULT_HEIGHT,
     width: int = DEFAULT_WIDTH,
     method: str = DEFAULT_RESAMPLE_METHOD,
+    shuffle: bool = False,
+    seed: int | None = None,
     **sampler_kwargs: Any,
 ) -> DataProducer:
-    scale = Mesoscale.arange(
-        dx=dx,
-        dy=dy,
-        start=start,
-        stop=stop,
-        step=step,
+    r = resampler(
+        dsets,
+        dx,
+        dy,
+        start,
+        stop,
+        step,
         p0=p0,
         p1=p1,
         rate=rate,
         levels=levels,
+        height=height,
+        width=width,
+        method=method,
     )
-
-    resampler = scale.resample(DatasetSequence(dsets).fit(scale), height=height, width=width, method=method)
     if callable(indices):
-        indices = indices(resampler.domain, **sampler_kwargs)
-    return DataProducer(indices, resampler=resampler)
+        indices = indices(r.domain, **sampler_kwargs)
+
+    p = DataProducer(indices, resampler=r)
+    if shuffle:
+        p.shuffle(seed=seed or 0)
+    return p
 
 
 def generator(
-    paths: CanBeItems[StrPath, Depends],
+    dsets: Iterable[DependentDataset] | CanBeItems[StrPath, Depends],
     indices: Iterable[PointOverTime] | Callable[[Domain], Iterable[PointOverTime]] = LinearSampler,
     *,
     dx: float = DEFAULT_DX,
@@ -246,11 +265,12 @@ def generator(
     # - data consumer -
     maxsize: int = 0,
     timeout: float | None = None,
+    shuffle: bool = False,
+    seed: int | None = None,
     **sampler_kwargs: Any,
 ) -> DataGenerator[Array[[Nv, Nt, Nz, Ny, Nx], np.float_]]:
-    datasets = open_datasets(paths, levels=levels)
     data_producer = producer(
-        datasets,
+        dsets,
         indices,
         dx=dx,
         dy=dy,
@@ -264,13 +284,15 @@ def generator(
         height=height,
         width=width,
         method=method,
+        shuffle=shuffle,
+        seed=seed,
         **sampler_kwargs,
     )
     return DataGenerator(data_producer, maxsize=maxsize, timeout=timeout)
 
 
 def loader(
-    paths: CanBeItems[StrPath, Depends],
+    dsets: Iterable[DependentDataset] | CanBeItems[StrPath, Depends],
     indices: Iterable[PointOverTime] | Callable[[Domain], Iterable[PointOverTime]] = LinearSampler,
     *,
     dx: float = DEFAULT_DX,
@@ -289,17 +311,20 @@ def loader(
     maxsize: int = 0,
     timeout: float | None = None,
     # - data loader -
+    shuffle: bool = False,
+    seed: int | None = None,
+    # - data loader -
     batch_size: int | None = 1,
-    shuffle: bool | None = None,
+    # shuffle: bool | None = None,
     num_workers: int = 0,
     pin_memory: bool = False,
     drop_last: bool = False,
     **sampler_kwargs: Any,
-) -> Iterable[Array[[Nv, Nt, Ny, Nx, Nz], np.float_]]:
+) -> _compat.DataLoader[Array[[Nv, Nt, Nz, Ny, Nx], np.float_]]:
     if not _compat._has_torch:
         raise RuntimeError("torch is not installed!")
-    dataset = generator(
-        paths,
+    data_generator = generator(
+        dsets,
         indices,
         dx=dx,
         dy=dy,
@@ -315,10 +340,12 @@ def loader(
         method=method,
         maxsize=maxsize,
         timeout=timeout,
+        shuffle=shuffle,
+        seed=seed,
         **sampler_kwargs,
     )
     return _compat.DataLoader(
-        dataset,
+        data_generator,
         batch_size=batch_size,
         timeout=timeout or 0,
         shuffle=shuffle,
