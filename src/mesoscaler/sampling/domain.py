@@ -124,6 +124,10 @@ class BoundingBox(NamedTuple):
 
 
 class DatasetSequence(DataSequence[DependentDataset]):
+    def __init__(self, datasets: Iterable[DependentDataset]) -> None:
+        super().__init__(datasets)
+        self._fitted = False
+
     def get_coordinates(self) -> Mapping[Coordinates, Sequence[Array[[...], Any]]]:
         return {
             LON: [((ds[LON].to_numpy() - 180.0) % 360 - 180.0) for ds in self],
@@ -142,9 +146,14 @@ class DatasetSequence(DataSequence[DependentDataset]):
         domain = x if isinstance(x, AbstractDomain) else self.get_domain(x)
         # TODO: need to determine the intersection of the lon,lat based on the greatest extent
         # | domain.bbox.intersect2d(ds[LON], ds[LAT])
-        return DatasetSequence(
+        ds = DatasetSequence(
             ds.sel({TIME: ds[TIME].isin(domain.time), LVL: ds[LVL].isin(domain.levels)}) for ds in self
         )
+        self._fitted = True
+        return ds
+
+    def is_fit(self) -> bool:
+        return self._fitted
 
     def batch(self, x: Mapping[Coordinates, Iterable[Sequence[float | np.datetime64]]]) -> DatasetSequence:
         return DatasetSequence(

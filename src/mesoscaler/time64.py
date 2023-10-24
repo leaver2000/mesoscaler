@@ -9,11 +9,12 @@ import datetime
 
 import numpy as np
 
+from . import utils
 from ._metadata import VariableEnum, auto_field
 from ._typing import Any, Array, Literal, N, TypeAlias, Union, overload
 
-TimeDeltaValue: TypeAlias = datetime.timedelta | np.timedelta64 | int
-DateTimeValue: TypeAlias = datetime.datetime | np.datetime64 | str | float
+DateTimeValue: TypeAlias = datetime.datetime | np.datetime64 | str
+TimeDeltaValue: TypeAlias = datetime.timedelta | np.timedelta64 | int | float
 Datetime64UnitLiteral: TypeAlias = Literal[
     "datetime64[Y]",
     "datetime64[M]",
@@ -80,10 +81,25 @@ class Time64(str, VariableEnum):
     nanoseconds = _auto_time("ns")
 
     @classmethod
+    def unpack(cls, x: np.datetime64 | np.timedelta64) -> tuple[Time64, int]:
+        """
+        >>> import mesoscaler as ms
+        >>> ms.hours.unpack(np.datetime64('2022-01-01T00','h'))
+        (<Time64.hours: 'h'>, 2022)
+        >>> ms.hours.unpack(np.timedelta64(2,'h'))
+        (<Time64.hours: 'h'>, 2)
+        """
+        return cls(x.dtype.name), int(x.astype(int))
+
+    @classmethod
     def _missing_(cls, value) -> Time64:
         if isinstance(value, np.dtype) and value.type in (np.datetime64, np.timedelta64):
             return cls(value.name)
         raise ValueError(f"Invalid value for {cls.__class__.__name__}: {value!r}")
+
+    @property
+    def dtypes(self) -> tuple[str, str]:
+        return tuple(self.aliases[:2])  # type: ignore
 
     @overload
     def infer_dtype(self, x: DateTimeValue, /) -> np.dtype[np.datetime64]:
@@ -103,29 +119,8 @@ class Time64(str, VariableEnum):
         Returns:
         np.dtype[np.datetime64 | np.timedelta64]: The NumPy dtype for the input value.
         """
-        return np.dtype(self.aliases[~isinstance(x, (datetime.datetime, np.datetime64, float, str))])
-
-    @overload
-    def arange(
-        self, start: DateTimeValue, stop: DateTimeValue, step: TimeDeltaValue | None = None
-    ) -> Array[[N], np.datetime64]:
-        ...
-
-    @overload
-    def arange(
-        self, start: TimeDeltaValue, stop: TimeDeltaValue, step: TimeDeltaValue | None = None
-    ) -> Array[[N], np.timedelta64]:
-        ...
-
-    def arange(
-        self,
-        start: DateTimeValue | TimeDeltaValue,
-        stop: DateTimeValue | TimeDeltaValue,
-        step: TimeDeltaValue | None = None,
-    ) -> Array[[N], np.datetime64 | np.timedelta64]:
-        dtype = self.infer_dtype(start)
-
-        return np.arange(start, stop, step, dtype=dtype)
+        idx = ~isinstance(x, (datetime.datetime, np.datetime64, str))
+        return np.dtype(self.aliases[idx])
 
     def delta(self, value: int | datetime.timedelta | np.timedelta64) -> np.timedelta64:
         return np.timedelta64(value, self)
@@ -157,28 +152,138 @@ class Time64(str, VariableEnum):
             __x = datetime.datetime(__x, *args)
         return np.datetime64(__x, self)
 
+    # - array methods -
+    @overload
+    def arange(
+        self, start: DateTimeValue, stop: DateTimeValue, step: TimeDeltaValue | None = None, /
+    ) -> Array[[N], np.datetime64]:
+        ...
+
+    @overload
+    def arange(
+        self, start: TimeDeltaValue, stop: TimeDeltaValue, step: TimeDeltaValue | None = None, /
+    ) -> Array[[N], np.timedelta64]:
+        ...
+
+    @overload
+    def arange(
+        self,
+        start: DateTimeValue | TimeDeltaValue,
+        stop: DateTimeValue | TimeDeltaValue,
+        step: TimeDeltaValue | None = None,
+        /,
+    ) -> Array[[N], np.datetime64 | np.timedelta64]:
+        ...
+
+    def arange(
+        self,
+        start: DateTimeValue | TimeDeltaValue,
+        stop: DateTimeValue | TimeDeltaValue,
+        step: TimeDeltaValue | None = None,
+        /,
+    ) -> Array[[N], np.datetime64 | np.timedelta64]:
+        dtype = self.infer_dtype(start)
+
+        return np.arange(start, stop, step, dtype=dtype)
+
+    @overload
+    def batch(
+        self,
+        start: DateTimeValue,
+        stop: DateTimeValue,
+        step: TimeDeltaValue | None = None,
+        /,
+        *,
+        size: int,
+    ) -> Array[[N, N], np.datetime64]:
+        ...
+
+    @overload
+    def batch(
+        self,
+        start: TimeDeltaValue,
+        stop: TimeDeltaValue,
+        step: TimeDeltaValue | None = None,
+        /,
+        *,
+        size: int,
+    ) -> Array[[N, N], np.timedelta64]:
+        ...
+
+    @overload
+    def batch(
+        self,
+        start: DateTimeValue | TimeDeltaValue,
+        stop: DateTimeValue | TimeDeltaValue,
+        step: TimeDeltaValue | None = None,
+        /,
+        *,
+        size: int,
+    ) -> Array[[N, N], np.datetime64 | np.timedelta64]:
+        ...
+
+    def batch(
+        self,
+        start: DateTimeValue | TimeDeltaValue,
+        stop: DateTimeValue | TimeDeltaValue,
+        step: TimeDeltaValue | None = None,
+        /,
+        *,
+        size: int,
+    ) -> Array[[N, N], np.datetime64 | np.timedelta64]:
+        """
+        >>> import mesoscaler as ms
+        >>> ms.hours.batch('2022-01-01', '2022-02-01', 6, size=4)
+        array([['2022-01-01T00', '2022-01-01T06', '2022-01-01T12','2022-01-01T18']
+                ...
+                ['2022-01-31T00', '2022-01-31T06', '2022-01-31T12', '2022-01-31T18']], dtype='datetime64[h]')
+        """
+        return utils.batch(self.arange(start, stop, step), size, strict=True)
+
 
 del _auto_time
 
-years, months, days, hours, minutes, seconds, milliseconds, microseconds, nanoseconds = (
-    Time64.years,
-    Time64.months,
-    Time64.days,
-    Time64.hours,
-    Time64.minutes,
-    Time64.seconds,
-    Time64.milliseconds,
-    Time64.microseconds,
-    Time64.nanoseconds,
-)
+
+Y: Literal[Time64.years]
+years: Literal[Time64.years]
+M: Literal[Time64.months]
+months: Literal[Time64.months]
+D: Literal[Time64.days]
+days: Literal[Time64.days]
+h: Literal[Time64.hours]
+hours: Literal[Time64.hours]
+m: Literal[Time64.minutes]
+minutes: Literal[Time64.minutes]
+s: Literal[Time64.seconds]
+seconds: Literal[Time64.seconds]
+ms: Literal[Time64.milliseconds]
+milliseconds: Literal[Time64.milliseconds]
+us: Literal[Time64.microseconds]
+microseconds: Literal[Time64.microseconds]
+ns: Literal[Time64.nanoseconds]
+nanoseconds: Literal[Time64.nanoseconds]
 
 
-def daterange(
-    start: DateTimeValue,
-    end: DateTimeValue,
-    step: TimeDeltaValue | None = None,
-    /,
-    *,
-    freq: Time64Literal | Time64 = hours,
-) -> Array[[N], np.datetime64]:
-    return Time64(freq).arange(start, end, step)
+def __getattr__(name: str) -> Time64:
+    """
+    >>> import mesoscaler.time64 as t64
+    >>> t64.hours
+    <Time64.hours: 'h'>
+    >>> t64.h
+    <Time64.hours: 'h'>
+    >>> t64.h.datetime('2001-01-01')
+    numpy.datetime64('2001-01-01T00','h')
+    >>> t64.h.delta(2)
+    numpy.timedelta64(2,'h')
+    >>> t64.h.batch('2023-01-01', '2023-01-07', 6, size=4)
+    array([['2023-01-01T00', '2023-01-01T06', '2023-01-01T12', '2023-01-01T18'],
+           ['2023-01-02T00', '2023-01-02T06', '2023-01-02T12', '2023-01-02T18'],
+           ['2023-01-03T00', '2023-01-03T06', '2023-01-03T12', '2023-01-03T18'],
+           ['2023-01-04T00', '2023-01-04T06', '2023-01-04T12', '2023-01-04T18'],
+           ['2023-01-05T00', '2023-01-05T06', '2023-01-05T12', '2023-01-05T18'],
+           ['2023-01-06T00', '2023-01-06T06', '2023-01-06T12', '2023-01-06T18']],
+           dtype='datetime64[h]')
+    """
+    if name in __annotations__:
+        return Time64(name)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

@@ -50,7 +50,6 @@ from ._typing import (
 from .utils import join_kv, repr_
 
 _T1 = TypeVar("_T1")
-_T2 = TypeVar("_T2")
 
 
 class NamedAndSized(Sized, abc.ABC):
@@ -252,6 +251,6 @@ class DataGenerator(NamedAndSized, IterableDataset[_T1]):
         # during iteration, and a While loop is difficult to break out of.
         return (self.queue.get(block=True, timeout=self.timeout) for _ in range(len(self)))
 
-    def start(self):
+    def start(self) -> Self:
         self.thread.start()
         return self

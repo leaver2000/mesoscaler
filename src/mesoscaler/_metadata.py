@@ -236,9 +236,10 @@ class _EnumMetaCls(enum.EnumMeta):
     # =================================================================================================================
     def __call__(cls, item: Iterable[_Item] | _Item) -> Any | list[Any]:  # type: ignore[override]
         """It is possible to return multiple members if the members share an alias."""
-        from .utils import is_scalar
+        if isinstance(item, cls):
+            return item
 
-        if is_scalar(item):
+        if np.isscalar(item):
             return cls._scalar_lookup(item)
         return cls.loc[cls.is_in(item)]  # type: ignore
 

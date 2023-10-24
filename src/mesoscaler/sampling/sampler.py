@@ -1,24 +1,12 @@
 from __future__ import annotations
 
 import abc
-import datetime
 import itertools
 
 import numpy as np
 
-from .. import time64, utils
-from .._typing import (
-    AreaExtent,
-    Array,
-    Iterator,
-    N,
-    Nt,
-    Nx,
-    Ny,
-    Point,
-    PointOverTime,
-    TimeSlice,
-)
+from .. import utils
+from .._typing import AreaExtent, Array, Iterator, N, Nx, Ny, Point, PointOverTime
 from .domain import Domain, DomainIntersectionSampler
 
 
@@ -41,28 +29,18 @@ class TimeAndPointSampler(DomainIntersectionSampler[PointOverTime], abc.ABC):
             return indices
         return self._indices
 
-    @property
-    @abc.abstractmethod
-    def timedelta64(self) -> np.timedelta64:
-        ...
-
     # =================================================================================================================
     @abc.abstractmethod
     def get_lon_lats(self) -> tuple[Array[[Nx], np.float_], Array[[Ny], np.float_]]:
         ...
 
     @abc.abstractmethod
-    def get_time(self) -> Array[[Nt], np.datetime64]:
+    def get_time_batches(self) -> Array[[N, N], np.datetime64]:
         ...
 
     # =================================================================================================================
-    def iter_time(self) -> Iterator[TimeSlice]:
-        time_indices = self.get_time()
-
-        timedelta = self.timedelta64
-        mask = np.abs(time_indices.max() - time_indices) >= timedelta
-
-        return (np.s_[time : time + timedelta] for time in time_indices[mask])
+    def iter_time(self) -> Iterator[Array[[N], np.datetime64]]:
+        yield from self.get_time_batches()
 
     def iter_points(self) -> Iterator[Point]:
         lons, lats = self.get_lon_lats()
@@ -89,31 +67,13 @@ class TimeSampler(TimeAndPointSampler):
         domain: Domain,
         /,
         *,
-        time_frequency: time64.Time64Like = time64.Time64("hours"),
-        time_step: int = 1,
+        time_batch_size: int = 1,
     ) -> None:
         super().__init__(domain)
-        self.time_frequency = time64.Time64(time_frequency)
-        self.time_step = time_step
+        self.time_batch_size = time_batch_size
 
-    @property
-    def timedelta64(self) -> np.timedelta64:
-        return self.time_frequency.delta(self.time_step)
-
-    def get_time(self) -> Array[[N], np.datetime64]:
-        return self.date_range(step=self.timedelta64)
-
-    def date_range(
-        self,
-        start: datetime.datetime | np.datetime64 | str | None = None,
-        stop: datetime.datetime | np.datetime64 | str | None = None,
-        step: int | datetime.timedelta | np.timedelta64 | None = None,
-    ) -> Array[[N], np.datetime64]:
-        freq = self.time_frequency
-        start = start or self.min_time
-        stop = freq.datetime(stop or self.max_time)
-        stop += freq.delta(1)  # end is exclusive
-        return freq.arange(start, stop, step)
+    def get_time_batches(self) -> Array[[N, N], np.datetime64]:
+        return utils.batch(self.time, self.time_batch_size, strict=True)
 
 
 class LinearSampler(TimeSampler):
@@ -123,18 +83,14 @@ class LinearSampler(TimeSampler):
         /,
         *,
         lon_lat_frequency: int = 100,
-        time_frequency: time64.Time64Like = time64.Time64("hours"),
-        time_step: int = 1,
+        time_batch_size: int = 1,
     ) -> None:
-        super().__init__(domain, time_frequency=time_frequency, time_step=time_step)
+        super().__init__(domain, time_batch_size=time_batch_size)
         self.lon_lat_frequency = lon_lat_frequency
 
     def get_lon_lats(self) -> tuple[Array[[N], np.float_], Array[[N], np.float_]]:
         frequency = self.lon_lat_frequency
-        return (
-            self.linspace("lon", frequency=frequency),
-            self.linspace("lat", frequency=frequency),
-        )
+        return (self.linspace("lon", frequency=frequency), self.linspace("lat", frequency=frequency))
 
 
 class AreaOfInterestSampler(TimeSampler):
@@ -145,12 +101,11 @@ class AreaOfInterestSampler(TimeSampler):
         domain: Domain,
         /,
         *,
+        aoi: tuple[float, float, float, float] | AreaExtent,  #  (-120, 30.0, -70, 25.0),
         lon_lat_frequency: int = 5,
-        time_frequency: time64.Time64Like = time64.Time64("hours"),
-        time_step: int = 1,
-        aoi: tuple[float, float, float, float] | AreaExtent = (-120, 30.0, -70, 25.0),
+        time_batch_size: int = 1,
     ) -> None:
-        super().__init__(domain, time_frequency=time_frequency, time_step=time_step)
+        super().__init__(domain, time_batch_size=time_batch_size)
         self.aoi = aoi
         self.lon_lat_frequency = lon_lat_frequency
 

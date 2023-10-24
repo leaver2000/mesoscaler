@@ -1,5 +1,6 @@
-import itertools
+from __future__ import annotations
 
+import itertools
 
 import src.mesoscaler.utils as utils
 

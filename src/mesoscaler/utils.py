@@ -25,8 +25,6 @@ import urllib.parse
 from collections.abc import Sequence
 
 import numpy as np
-import pyproj
-import pyresample.geometry
 import toml
 
 try:
@@ -42,7 +40,6 @@ except (NameError, ImportError):
 from ._typing import (
     Any,
     AnyArrayLike,
-    AreaExtent,
     Array,
     Callable,
     CanBeItems,
@@ -144,37 +141,6 @@ def is_null(value: Any) -> bool:
 
 
 # =====================================================================================================================
-# - projection utils
-# =====================================================================================================================
-def area_definition(
-    width: float,
-    height: float,
-    projection: pyproj.CRS,
-    area_extent: AreaExtent,
-    lons: NDArray[np.float_] | None = None,
-    lats: NDArray[np.float_] | None = None,
-    dtype: Any = np.float_,
-    area_id: str = "undefined",
-    description: str = "undefined",
-    proj_id: str = "undefined",
-    nprocs: int = 1,
-) -> pyresample.geometry.AreaDefinition:
-    return pyresample.geometry.AreaDefinition(
-        area_id,
-        description,
-        proj_id,
-        width=width,
-        height=height,
-        projection=projection,
-        area_extent=area_extent,
-        lons=lons,
-        lats=lats,
-        dtype=dtype,
-        nprocs=nprocs,
-    )
-
-
-# =====================================================================================================================
 # - time utils
 # =====================================================================================================================
 # TODO: move this to time64
@@ -187,22 +153,38 @@ def slice_time(t: Array[[...], np.datetime64], s: TimeSlice, /) -> Array[[N], np
 # =====================================================================================================================
 # - array/tensor utils
 # =====================================================================================================================
-def batch(x: Array[[N], NumpyGeneric_T], n: int, *, strict: bool = False) -> Array[[N, N], NumpyGeneric_T]:
+def batch(x: Array[[N], NumpyGeneric_T], n: int, *, strict: bool = True) -> Array[[N, N], NumpyGeneric_T]:
     """
-    >>> time = np.arange(datetime.date(2020, 1, 1), datetime.date(2020, 2, 1), datetime.timedelta(hours=1)).astype(
-        "datetime64[h]"
-    )
-    >>> a = batch(time, 6)
-    >>> a.shape
-    >>> (124, 6)
+    >>> from src.mesoscaler import utils
+    >>> import numpy as np
+    >>> a = np.arange(10)
+    >>> utils.batch(a, 5)
+    array([[0, 1, 2, 3, 4],
+           [5, 6, 7, 8, 9]])
+    >>> utils.batch(a, 4)
+    Traceback (most recent call last):
+      File "<stdin>", line 1, in <module>
+      File "/home/leaver/mesoscaler/src/mesoscaler/utils.py", line 169, in batch
+        raise ValueError(
+    ValueError: Array size 10 is not divisible by batch size 4.
+    try using a size of:
+    [ 1  2  5 10]
+    >>> utils.batch(a, 4, strict=False)
+    array([[0, 1, 2, 3],
+           [4, 5, 6, 7],
+           [8, 9, 0, 0]])
     """
-    size = x.size
-    if size % n != 0:
-        if strict:
-            raise Exception(f"{size % n}")
-        x = np.pad(x, (0, n - size % n))
+    s = x.size
+    m = s % n
+    if m and strict:
+        y = np.arange(1, s + 1)
+        raise ValueError(
+            f"Array size {s} is not divisible by batch size {n}.\ntry using a size of:\n{y[(s % y) == 0]}"
+        )
+    elif m:
+        x = np.pad(x, (0, n - m))
 
-    return np.stack(np.split(x, np.arange(n, size, n)))
+    return x.reshape(-1, n)
 
 
 def normalize(x: Array[[...], np.number[Any]]) -> Array[[...], np.float_]:
