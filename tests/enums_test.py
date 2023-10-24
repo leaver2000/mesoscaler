@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import pandas as pd
 import pytest
 
@@ -7,20 +9,7 @@ from src.mesoscaler._metadata import (
     VariableEnum,
     auto_field,
 )
-from src.mesoscaler.enums import (
-    ERA5,
-    LAT,
-    LON,
-    LVL,
-    TIME,
-    URMA,
-    Dimensions,
-    T,
-    # TimeFrequency,
-    X,
-    Y,
-    Z,
-)
+from src.mesoscaler.enums import ERA5, LAT, LON, LVL, TIME, URMA, Dimensions, T, X, Y, Z
 
 
 def test_coordinate_axes() -> None:
