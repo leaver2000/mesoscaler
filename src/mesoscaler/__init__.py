@@ -16,8 +16,6 @@ from .enums import (
     Y,
     Z,
     auto_field,
-    unpack_coords,
-    unpack_dims,
 )
 from .generic import DataGenerator
 from .sampling.domain import DatasetSequence, Domain
@@ -68,8 +66,6 @@ __all__ = [
     "DependentVariables",
     "ERA5",
     "URMA",
-    "unpack_coords",
-    "unpack_dims",
     "auto_field",
     # - utils -
     "utils",

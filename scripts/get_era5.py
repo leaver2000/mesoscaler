@@ -3,6 +3,10 @@ import datetime
 import xarray as xr
 import numpy as np
 
+try:
+    import gcsfs  # noqa: F401
+except ImportError:
+    raise ImportError("Please install gcsfs to use this script. (pip install gcsfs)")
 # https://discuss.pytorch.org/t/dataloader-parallelization-synchronization-with-zarr-xarray-dask/176149
 GEOPOTENTIAL = "geopotential"
 SPECIFIC_HUMIDITY = "specific_humidity"
@@ -17,7 +21,7 @@ UPPER_AIR_VARIABLES = [
     TEMPERATURE,
     U_COMPONENT_OF_WIND,
     V_COMPONENT_OF_WIND,
-    VERTICAL_VELOCITY,
+    # VERTICAL_VELOCITY,
 ]
 
 
@@ -28,7 +32,6 @@ def main(
     ds = xr.open_zarr(google_store).sel(time=np.s_[datetime.datetime(2019, 1, 1) :])
     ds = ds[UPPER_AIR_VARIABLES].sel(level=ds.level >= 200)
     ds.to_zarr(local_store)
-
     return 0
 
 

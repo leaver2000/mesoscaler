@@ -16,17 +16,12 @@ class Dimensions(IndependentVariables):
     X = auto_field(aliases=["x", "longitude", "grid_longitude"])
 
 
-def unpack_dims() -> tuple[Literal[Dimensions.T], Literal[Dimensions.Z], Literal[Dimensions.Y], Literal[Dimensions.X]]:
-    """>>> T, Z, Y, X = mesoscaler.unpack_dims()"""
-    return (
-        Dimensions.T,
-        Dimensions.Z,
-        Dimensions.Y,
-        Dimensions.X,
-    )
-
-
-DIMENSIONS = T, Z, Y, X = unpack_dims()
+DIMENSIONS = T, Z, Y, X = (
+    Dimensions.T,
+    Dimensions.Z,
+    Dimensions.Y,
+    Dimensions.X,
+)
 DimensionsMapType: TypeAlias = Mapping[tuple[Literal[X], Literal[Y]] | Literal[Z] | Literal[T], _T]  # type: ignore[valid-type]
 
 
@@ -41,36 +36,12 @@ class Coordinates(IndependentVariables):
         return self.metadata["axis"]
 
 
-def unpack_coords() -> (
-    tuple[
-        Literal[Coordinates.time],
-        Literal[Coordinates.vertical],
-        Literal[Coordinates.latitude],
-        Literal[Coordinates.longitude],
-    ]
-):
-    """>>> TIME, LEVEL, LAT, LON = mesoscaler.unpack_coords()"""
-    return (
-        Coordinates.time,
-        Coordinates.vertical,
-        Coordinates.latitude,
-        Coordinates.longitude,
-    )
-
-
-COORDINATES = TIME, LVL, LAT, LON = unpack_coords()
-
-
-# class CoordinateReferenceSystem(functools.partial, enum.Enum):
-#     lambert_azimuthal_equal_area = laea = pyproj.CRS, {"proj": "laea"}
-#     lambert_conformal_conic = lcc = pyproj.CRS, {"proj": "lcc"}
-
-#     def from_point(self, lon: float, lat: float, /) -> pyproj.CRS:
-#         return self(lon_0=lon, lat_0=lat)
-
-
-# LiteralProjection = Literal["laea", "lcc", "lambert_azimuthal_equal_area", "lambert_conformal_conic"]
-# LiteralCRS = CoordinateReferenceSystem | LiteralProjection
+COORDINATES = TIME, LVL, LAT, LON = (
+    Coordinates.time,
+    Coordinates.vertical,
+    Coordinates.latitude,
+    Coordinates.longitude,
+)
 
 
 class ERA5(DependentVariables):
@@ -133,19 +104,33 @@ class URMA(DependentVariables):
     | OROG          | orog         | orography               | surface orography            | surface               | m           |
     """
 
-    TCC = auto_field("total_cloud_cover", units="%", type_of_level="atmosphereSingleLayer")
-    CEIL = auto_field("ceiling", units="m", type_of_level="cloudCeiling")
-    U10 = auto_field("u_wind_component_10m", units="m s**-1", type_of_level="heightAboveGround")
-    V10 = auto_field("v_wind_component_10m", units="m s**-1", type_of_level="heightAboveGround")
-    SI10 = auto_field("wind_speed_10m", units="m s**-1", type_of_level="heightAboveGround")
-    GUST = auto_field("wind_speed_gust", units="m s**-1", type_of_level="heightAboveGround")
-    WDIR10 = auto_field("wind_direction_10m", units="Degree true", type_of_level="heightAboveGround")
-    T2M = auto_field("temperature_2m", units="K", type_of_level="heightAboveGround")
-    D2M = auto_field("dewpoint_temperature_2m", units="K", type_of_level="heightAboveGround")
-    SH2 = auto_field("specific_humidity_2m", units="kg kg**-1", type_of_level="heightAboveGround")
-    SP = auto_field("surface_pressure", units="Pa", type_of_level="surface")
-    VIS = auto_field("visibility", units="m", type_of_level="surface")
-    OROG = auto_field("orography", units="m", type_of_level="surface")
+    TCC = auto_field("total_cloud_cover", units="%", type_of_level="atmosphereSingleLayer", level=0, short_name="tcc")
+    CEIL = auto_field("ceiling", units="m", type_of_level="cloudCeiling", level=0, short_name="ceil")
+    U10 = auto_field(
+        "u_wind_component_10m", units="m s**-1", type_of_level="heightAboveGround", level=10, short_name="u10"
+    )
+    V10 = auto_field(
+        "v_wind_component_10m", units="m s**-1", type_of_level="heightAboveGround", level=10, short_name="v10"
+    )
+    SI10 = auto_field(
+        "wind_speed_10m", units="m s**-1", type_of_level="heightAboveGround", level=10, short_name="si10"
+    )
+    GUST = auto_field(
+        "wind_speed_gust", units="m s**-1", type_of_level="heightAboveGround", level=10, short_name="gust"
+    )
+    WDIR10 = auto_field(
+        "wind_direction_10m", units="Degree true", type_of_level="heightAboveGround", level=10, short_name="wdir10"
+    )
+    T2M = auto_field("temperature_2m", units="K", type_of_level="heightAboveGround", level=2, short_name="t2m")
+    D2M = auto_field(
+        "dewpoint_temperature_2m", units="K", type_of_level="heightAboveGround", level=2, short_name="d2m"
+    )
+    SH2 = auto_field(
+        "specific_humidity_2m", units="kg kg**-1", type_of_level="heightAboveGround", level=2, short_name="sh2"
+    )
+    SP = auto_field("surface_pressure", units="Pa", type_of_level="surface", level=0, short_name="sp")
+    VIS = auto_field("visibility", units="m", type_of_level="surface", level=0, short_name="vis")
+    OROG = auto_field("orography", units="m", type_of_level="surface", level=0, short_name="orog")
 
     @property
     def units(self) -> str:
@@ -154,6 +139,14 @@ class URMA(DependentVariables):
     @property
     def type_of_level(self) -> str:
         return self.metadata["type_of_level"]
+
+    @property
+    def level(self) -> int:
+        return self.metadata["level"]
+
+    @property
+    def short_name(self) -> str:
+        return self.metadata["short_name"]
 
 
 URMA_VARS = (

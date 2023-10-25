@@ -8,8 +8,7 @@ import pytest
 import xarray as xr
 
 import src.mesoscaler as mesoscaler
-
-TIME, LEVEL, LAT, LON = mesoscaler.unpack_coords()
+from src.mesoscaler import time as TIME
 
 here = os.path.abspath(os.path.dirname(__file__))
 data = os.path.abspath(os.path.join(here, "data"))

@@ -149,11 +149,8 @@ class DatasetSequence(DataSequence[DependentDataset]):
         ds = DatasetSequence(
             ds.sel({TIME: ds[TIME].isin(domain.time), LVL: ds[LVL].isin(domain.levels)}) for ds in self
         )
-        self._fitted = True
-        return ds
 
-    def is_fit(self) -> bool:
-        return self._fitted
+        return ds
 
     def batch(self, x: Mapping[Coordinates, Iterable[Sequence[float | np.datetime64]]]) -> DatasetSequence:
         return DatasetSequence(
@@ -170,6 +167,14 @@ class DatasetSequence(DataSequence[DependentDataset]):
         if levels is not None:
             keys.append((LVL, levels))
         return DatasetSequence(ds.sel({key: ds[key].isin(value)}) for ds in self for key, value in keys)
+
+    @property
+    def time(self) -> list[Array[[N], np.datetime64]]:
+        return [ds[TIME].to_numpy() for ds in self]
+
+    @property
+    def levels(self) -> list[Array[[N], np.float_]]:
+        return [ds[LVL].to_numpy() for ds in self]
 
 
 class AbstractDomain(abc.ABC):
@@ -259,13 +264,13 @@ class AbstractDomain(abc.ABC):
     def iter_dataset_and_extent(self) -> Iterator[DatasetAndExtent]:
         return zip(self.datasets, self.area_extents)
 
-    @property
-    def shape(self) -> tuple[int, ...]:
-        return (
-            self.n_vars,
-            len(self.time),
-            len(self.levels),
-        )
+    # @property
+    # def shape(self) -> tuple[int, ...]:
+    #     return (
+    #         self.n_vars,
+    #         len(self.time),
+    #         len(self.levels),
+    #     )
 
     def batch_time(self, n: int) -> Array[[N, N], np.datetime64]:
         return utils.batch(self.time, n, strict=True)

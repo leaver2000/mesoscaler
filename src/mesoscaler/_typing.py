@@ -150,7 +150,7 @@ DictStrAny: TypeAlias = DictStr[Any]
 StrPath: TypeAlias = "str | os.PathLike[str]"
 Method: TypeAlias = Callable[Concatenate[_T, _P], _T_co]
 ClassMethod: TypeAlias = Callable[Concatenate[type[_T], _P], _T_co]
-CanBeItems: TypeAlias = Mapping[_T, _T_co] | Iterable[tuple[_T, _T_co]]
+CanBeItems: TypeAlias = Mapping[_T, _T_co] | list[tuple[_T, _T_co]]
 
 # - numpy
 Int: TypeAlias = int | np.integer[Any]

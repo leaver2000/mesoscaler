@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import abc
+import dataclasses
 import functools
 
 import numpy as np
@@ -11,6 +12,7 @@ from pyresample.geometry import AreaDefinition, GridDefinition
 
 from .._typing import (
     N4,
+    TYPE_CHECKING,
     Any,
     Array,
     Callable,
@@ -29,6 +31,20 @@ from .._typing import (
 from ..enums import LVL, TIME, T, X, Y, Z
 from .domain import AbstractDomain, Domain
 
+if TYPE_CHECKING:
+    import cartopy.crs as ccrs
+    import matplotlib.pyplot as plt
+    from cartopy.mpl.geoaxes import GeoAxes
+try:
+    import cartopy.crs as ccrs
+    import matplotlib.pyplot as plt
+    from cartopy.mpl.geoaxes import GeoAxes
+
+    has_cartopy = True
+except ImportError:
+    has_cartopy = False
+
+
 _VARIABLES = "variables"
 
 
@@ -38,29 +54,33 @@ class AbstractResampler(AbstractDomain, abc.ABC):
     >>> assert tuple(map(((Z, Y, X, C, T)).index, (C, T, Z, Y, X))) == ReSampler._axes_transposed
     """
 
+    @property
     @abc.abstractmethod
-    def vstack(
-        self, longitude: Longitude, latitude: Latitude, time: Array[[N], np.datetime64]
-    ) -> Array[[Nz, Ny, Nx, Nv | Nt], np.float_]:
-        """Call the root resampler to resample the data for a single point over time.
+    def resampler(self) -> ReSampler:
+        """The root resampler."""
 
-        ```
-        class SomeClass(AbstractResampler):
-            resampler:Resampler = ...
+    @property
+    def domain(self) -> Domain:
+        return self.resampler._domain
 
-            def vstack(
-                self, longitude: Longitude, latitude: Latitude, time: Array[[N], np.datetime64]
-            ) -> Array[[Nz, Ny, Nx, Nv | Nt], np.float_]:
-                return self.resampler.vstack(longitude, latitude, time)
-        ```
-        """
+    @property
+    def height(self) -> int:
+        return self.resampler._height
+
+    @property
+    def width(self) -> int:
+        return self.resampler._width
+
+    @property
+    def proj(self) -> Literal["laea", "lcc"]:
+        return self.resampler._proj
 
     def __call__(
         self, longitude: Longitude, latitude: Latitude, time: Array[[N], np.datetime64]
     ) -> Array[[Nv, Nt, Nz, Ny, Nx], np.float_]:
         """stack the data along `Nz` -> unsqueeze the variables & time -> reshape the data to match the expected output."""
 
-        arr = self.vstack(longitude, latitude, time)  # (Z, Y, X, C*T)
+        arr = self.resampler.vstack(longitude, latitude, time)  # (Z, Y, X, C*T)
         z, y, x = arr.shape[:3]
         # unsqueeze C
         arr = arr.reshape((z, y, x, -1, time.size))  # (Z, Y, X, C, T)
@@ -85,10 +105,16 @@ class AbstractResampler(AbstractDomain, abc.ABC):
 
 class ReSampler(AbstractResampler):
     # There are alot of callbacks and partial methods in this class.
+    _proj: Literal["laea", "lcc"]
 
     @property
-    def domain(self) -> Domain:
-        return self._domain
+    def resampler(self) -> ReSampler:
+        return self
+
+    def vstack(
+        self, longitude: Longitude, latitude: Latitude, time: Array[[N], np.datetime64]
+    ) -> Array[[Nz, Ny, Nx, Nv | Nt], np.float_]:
+        return np.stack(self._resample_point_over_time(longitude, latitude, time))  # (Z, Y, X, C*T)
 
     def __init__(
         self,
@@ -109,9 +135,9 @@ class ReSampler(AbstractResampler):
     ) -> None:
         super().__init__()
         self._domain = domain
-        self.height = height
-        self.width = width
-        self.proj = target_protection
+        self._height = height
+        self._width = width
+        self._proj = target_protection
 
         self._resample_method = _get_resample_method(
             method,
@@ -153,93 +179,197 @@ class ReSampler(AbstractResampler):
             for ds, area_extent in self.domain.iter_dataset_and_extent()
         ]
 
-    def vstack(
-        self, longitude: Longitude, latitude: Latitude, time: Array[[N], np.datetime64]
-    ) -> Array[[Nz, Ny, Nx, Nv | Nt], np.float_]:
-        return np.stack(self._resample_point_over_time(longitude, latitude, time))  # (Z, Y, X, C*T)
-
     @property
-    def plot(self) -> Callable[[float, float, Array[[N], np.datetime64]], PlotterAccessor]:
-        return functools.partial(PlotterAccessor, self)
+    def plot(self) -> functools.partial[SamplePlotter]:
+        return functools.partial(SamplePlotter, self)
 
 
-class PlotterAccessor(AbstractDomain):
-    _index: dict[str, list[Any]]
+@dataclasses.dataclass
+class PlotOption:
+    name: str
+    kind: Literal["contour", "barbs", "contourf"]
+    dim: int | tuple[int, int]
+    colors: str = "r"
+    linestyles: str = "--"
+    linewidths: float = 0.75
+    cmap: str = "Greens"
+    alpha: float = 1.0
 
+
+class SamplePlotter(AbstractResampler):
     @property
-    def domain(self) -> Domain:
-        return self.resampler.domain
+    def resampler(self) -> ReSampler:
+        return self._resampler
 
     def __init__(
-        self, resampler: ReSampler, longitude: float, latitude: float, time: Array[[N], np.datetime64]
+        self,
+        resampler: ReSampler,
+        longitude: Longitude,
+        latitude: Latitude,
+        time: Array[[N], np.datetime64],
+        /,
+        *,
+        transform: ccrs.Projection | None = None,
+        features: list = [],
+        grid_lines: bool = True,
+        coast_lines: bool = True,
     ) -> None:
+        if not has_cartopy:
+            raise ImportError("cartopy is not installed")
         super().__init__()
-        self.resampler = resampler
-        self.data = resampler(longitude, latitude, time)
-        p_def = resampler._partial_area_definition(longitude, latitude)
-        self.a_defs = [p_def(area_extent=area_extent) for area_extent in self.area_extents]
-        self._index = {"time": time.tolist(), "levels": self.levels.tolist()}
+        self._resampler = resampler
+        self.sample = sample = self.resampler(longitude, latitude, time)
+        self.shape = self.NV, self.NT, self.NZ, self.NY, self.NX = sample.shape
+        self.center = (longitude, latitude)
+        self._area_defs = [
+            _area_definition(
+                self.width,
+                self.height,
+                {"proj": self.proj, "lon_0": longitude, "lat_0": latitude, "units": "m"},
+                area_extent=self.area_extents[z],
+            )
+            for z in range(self.NZ)
+        ]
 
-    def index(self, key, value) -> int:
-        return self._index[key].index(value)
+        self._plot_options = {"contour": self._contour, "barbs": self._barbs, "contourf": self._contourf}
+        self._config = {
+            "grid_lines": grid_lines,
+            "coast_lines": coast_lines,
+            "transform": transform or ccrs.PlateCarree(),
+            "features": features,
+        }
+        self._fig = None
 
-    def level(self, time: np.datetime64, level: float) -> None:
-        import cartopy.crs as ccrs
-        import matplotlib.pyplot as plt
-        from cartopy.mpl.geoaxes import GeoAxes
-        from cartopy.feature import STATES
+    @property
+    def features(self) -> list:
+        return self._config["features"]
 
-        tidx = self.index("time", time)
-        lvl = self.index("levels", level)
-        area_def = self.a_defs[lvl]
+    @property
+    def transform(self) -> ccrs.Projection:
+        return self._config["transform"]
 
-        z, t, q, u, v = self.data[:, tidx, lvl]  # 300 hPa
+    @property
+    def grid_lines(self) -> bool:
+        return self._config["grid_lines"]
+
+    @property
+    def coast_lines(self) -> bool:
+        return self._config["coast_lines"]
+
+    def __call__(
+        self, longitude: Longitude, latitude: Latitude, time: Array[[N], np.datetime64], **kwargs
+    ) -> SamplePlotter:
+        """Create a new BatchPlotter with the same resampler and batch data, but with a different center."""
+        return self.resampler.plot(longitude, latitude, time, **(self._config | kwargs))
+
+    # =================================================================================================================
+    def gcf(self, figsize=(10, 10)):
+        if self._fig is None:
+            self._fig = plt.figure(figsize=figsize)
+        return self._fig
+
+    def level(
+        self, t_dim: int, z_dim: int, options: list[PlotOption], ax: GeoAxes, show_inner_domains: bool = True
+    ) -> None:
+        area_def = self._area_defs[z_dim]
         x, y = area_def.get_lonlats()
 
-        fig = plt.figure(figsize=(10, 10))
+        if show_inner_domains:
+            for ad in self._area_defs[:z_dim]:
+                self._plot_inner_domain(ax, *ad.get_lonlats())
 
-        ax = fig.add_subplot(1, 1, 1, projection=area_def.to_cartopy_crs())
-        assert isinstance(ax, GeoAxes)
+        if self.grid_lines:
+            ax.gridlines()
+        if self.coast_lines:
+            ax.coastlines()
 
-        ax.coastlines()
-        transform = ccrs.PlateCarree()
-        ax.add_feature(STATES)
-        ax.gridlines()
+        for feature in self.features:
+            ax.add_feature(feature)
 
+        ax.plot(
+            x,
+            y,
+            marker="x",
+            color="r",
+            linewidth=1,
+        )
+
+        if self.levels is not None:
+            lvl = self.levels[z_dim]
+            ax.set_title(f"Level: {lvl}")
+        for opt in options:
+            self._plot_options[opt.kind](ax, x, y, t_dim, z_dim, opt)
+
+    def all_levels(
+        self, t_dim: int, options: list[PlotOption], size: int = 10, show_inner_domains: bool = True
+    ) -> None:
+        ratio = self.width / self.height
+        fig = self.gcf(figsize=(size, (size / ratio) * self.NZ))
+        fig.tight_layout()
+
+        it = [
+            (z, fig.add_subplot(self.NZ, 1, self.NZ - z, projection=area_def.to_cartopy_crs()))
+            for z, area_def in enumerate(self._area_defs)
+        ]
+        for z_dim, ax in it:
+            self.level(t_dim, z_dim, ax=ax, options=options, show_inner_domains=show_inner_domains)  # type: ignore
+
+    # =================================================================================================================
+    def _barbs(
+        self,
+        ax: GeoAxes,
+        x: Array[[Ny, Nx], np.float_],
+        y: Array[[Ny, Nx], np.float_],
+        t_dim: int,
+        z_dim: int,
+        opt: PlotOption,
+    ) -> None:
+        u, v = self.sample[opt.dim, t_dim, z_dim, :, :]
+        ax.barbs(x, y, u, v, length=4, transform=self.transform, sizes=dict(emptybarb=0.01), alpha=opt.alpha)
+
+    def _contour(
+        self,
+        ax: GeoAxes,
+        x: Array[[Ny, Nx], np.float_],
+        y: Array[[Ny, Nx], np.float_],
+        t_dim: int,
+        z_dim: int,
+        opt: PlotOption,
+    ) -> None:
+        z = self.sample[opt.dim, t_dim, z_dim, :, :]
         ax.contour(
             x,
             y,
             z,
-            colors="k",
-            linewidths=1,
-            transform=transform,
+            transform=self.transform,
+            colors=opt.colors,
+            alpha=opt.alpha,
+            linewidths=opt.linewidths,
+            linestyles=opt.linestyles,
         )
 
-        ax.contour(
-            x,
-            y,
-            t,
-            colors="r",
-            linewidths=1,
-            linestyles="--",
-            transform=transform,
-        )
-        ax.contourf(
-            x,
-            y,
-            q,
-            cmap="Greens",
-            transform=transform,
-        )
+    def _contourf(
+        self,
+        ax: GeoAxes,
+        x: Array[[Ny, Nx], np.float_],
+        y: Array[[Ny, Nx], np.float_],
+        t_dim: int,
+        z_dim: int,
+        opt: PlotOption,
+    ) -> None:
+        z = self.sample[opt.dim, t_dim, z_dim, :, :]
+        ax.contourf(x, y, z, transform=self.transform, alpha=opt.alpha, cmap=opt.cmap)
 
-        ax.barbs(
-            x,
-            y,
-            u,
-            v,
-            length=2,
-            pivot="middle",
-            transform=transform,
+    def _plot_inner_domain(self, ax: GeoAxes, x: Array, y: Array) -> None:
+        x0, y0 = x[0, 0], y[0, 0]
+        x1, y1 = x[-1, -1], y[-1, -1]
+        ax.plot(
+            [x0, x1, x1, x0, x0],
+            [y0, y0, y1, y1, y0],
+            color="purple",
+            linewidth=1,
+            transform=self.transform,
+            linestyle="-.",
         )
 
 
