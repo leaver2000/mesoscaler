@@ -1,4 +1,9 @@
 from . import create, utils
+from .utils import (
+    pair,
+    iter_pair,
+    is_pair,
+)
 from .core import DataProducer, DependentDataset, Mesoscale, open_datasets
 from .enums import (
     ERA5,
@@ -69,6 +74,9 @@ __all__ = [
     "auto_field",
     # - utils -
     "utils",
+    "pair",
+    "is_pair",
+    "iter_pair",
     # - create -
     "create",
     # - time64 -

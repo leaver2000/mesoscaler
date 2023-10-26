@@ -100,6 +100,19 @@ def is_pair(x: Any, strict: bool = False) -> TypeGuard[Pair[Any]]:
     return condition
 
 
+def pair(x: _T1 | Pair[_T1]) -> Pair[_T1]:
+    if not is_pair(x):
+        return x, x  # type: ignore
+    return x
+
+
+def iter_pair(x: Pair[_T1] | Iterable[Pair[_T1]]) -> Iterator[Pair[_T1]]:
+    if is_pair(x):
+        yield x
+    else:
+        yield from x  # type: ignore
+
+
 # =====================================================================================================================
 # - time utils
 # =====================================================================================================================
@@ -348,19 +361,14 @@ def join_kv(
 # =====================================================================================================================
 # - iterable utils
 # =====================================================================================================================
+
+
 SizedIterFunc = Callable[[Iterable[Sized]], _T1]
 map_size: functools.partial[map[int]] = functools.partial(map, len)
 acc_size: SizedIterFunc[Iterable[int]] = lambda x: itertools.accumulate(map_size(x))
 max_size: SizedIterFunc[int] = lambda x: max(map_size(x))
 min_size: SizedIterFunc[int] = lambda x: min(map_size(x))
 sum_size: SizedIterFunc[int] = lambda x: sum(map_size(x))
-
-
-def iter_pair(x: Pair[Any] | Iterable[Pair[Any]]) -> Iterator[Pair[Any]]:
-    if is_pair(x):
-        yield x
-    else:
-        yield from x
 
 
 @overload
