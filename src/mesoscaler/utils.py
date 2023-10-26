@@ -101,9 +101,7 @@ def is_pair(x: Any, strict: bool = False) -> TypeGuard[Pair[Any]]:
 
 
 def pair(x: _T1 | Pair[_T1]) -> Pair[_T1]:
-    if not is_pair(x):
-        return x, x  # type: ignore
-    return x
+    return (x, x) if not is_pair(x) else x
 
 
 def iter_pair(x: Pair[_T1] | Iterable[Pair[_T1]]) -> Iterator[Pair[_T1]]:
@@ -148,14 +146,14 @@ def batch(x: Array[[N], NumpyGeneric_T], n: int, *, strict: bool = True) -> Arra
            [8, 9, 0, 0]])
     """
     s = x.size
-    m = s % n
-    if m and strict:
-        y = np.arange(1, s + 1)
-        raise ValueError(
-            f"Array size {s} is not divisible by batch size {n}.\ntry using a size of:\n{y[(s % y) == 0]}"
-        )
-    elif m:
-        x = np.pad(x, (0, n - m))
+    if m := s % n:
+        if strict:
+            y = np.arange(1, s + 1)
+            raise ValueError(
+                f"Array size {s} is not divisible by batch size {n}.\ntry using a size of:\n{y[(s % y) == 0]}"
+            )
+        else:
+            x = np.pad(x, (0, n - m))
 
     return x.reshape(-1, n)
 
