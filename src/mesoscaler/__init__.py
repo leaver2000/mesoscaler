@@ -1,9 +1,4 @@
 from . import create, utils
-from .utils import (
-    pair,
-    iter_pair,
-    is_pair,
-)
 from .core import DataProducer, DependentDataset, Mesoscale, open_datasets
 from .enums import (
     ERA5,
@@ -37,6 +32,20 @@ from .time64 import (
     nanoseconds,
     seconds,
     years,
+)
+from .utils import (
+    batch,
+    dump_json,
+    dump_toml,
+    is_pair,
+    iter_jsonl,
+    iter_pair,
+    load_json,
+    load_toml,
+    nd_intersect,
+    nd_union,
+    normalize,
+    pair,
 )
 
 __all__ = [
@@ -77,6 +86,15 @@ __all__ = [
     "pair",
     "is_pair",
     "iter_pair",
+    "batch",
+    "normalize",
+    "nd_union",
+    "nd_intersect",
+    "dump_toml",
+    "load_toml",
+    "dump_json",
+    "load_json",
+    "iter_jsonl",
     # - create -
     "create",
     # - time64 -
