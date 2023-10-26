@@ -20,7 +20,7 @@ from mesoscaler.enums import (
     V_WIND_COMPONENT_10M,
 )
 
-AWS_S3_BUCKET = "s3://noaa-urma-pds/urma2p5.*"
+URMA2P5_BUCKET = "s3://noaa-urma-pds/urma2p5.*"
 URMA2P5_DATE_FMT = "noaa-urma-pds/urma2p5.%Y%m%d"
 DEFAULT_URMA_VARIABLES = [
     SURFACE_PRESSURE,
@@ -79,7 +79,7 @@ def main(
     if not os.path.exists(temp_grib_dir):
         os.makedirs(temp_grib_dir)
 
-    for directory in filter_by_dates(client.glob(AWS_S3_BUCKET), start_date, end_date):
+    for directory in filter_by_dates(client.glob(URMA2P5_BUCKET), start_date, end_date):
         print(f"Downloading {directory}")
         resources = client.glob(f"s3://{directory}/urma2p5.t*2dvaranl_ndfd.grb2_wexp")
         client.get(resources, temp_grib_dir)

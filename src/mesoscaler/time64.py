@@ -13,7 +13,7 @@ from . import utils
 from ._metadata import VariableEnum, auto_field
 from ._typing import Any, Array, Literal, N, TypeAlias, Union, overload
 
-DateTimeValue: TypeAlias = datetime.datetime | np.datetime64 | str
+DateTimeValue: TypeAlias = datetime.date | datetime.datetime | np.datetime64 | str
 TimeDeltaValue: TypeAlias = datetime.timedelta | np.timedelta64 | int | float
 Datetime64UnitLiteral: TypeAlias = Literal[
     "datetime64[Y]",
@@ -119,7 +119,7 @@ class Time64(str, VariableEnum):
         Returns:
         np.dtype[np.datetime64 | np.timedelta64]: The NumPy dtype for the input value.
         """
-        idx = ~isinstance(x, (datetime.datetime, np.datetime64, str))
+        idx = ~isinstance(x, (datetime.date, datetime.datetime, np.datetime64, str))
         return np.dtype(self.aliases[idx])
 
     def delta(self, value: int | datetime.timedelta | np.timedelta64) -> np.timedelta64:

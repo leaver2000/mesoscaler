@@ -36,7 +36,7 @@ DEFAULT_VARIABLES = [
 def main(
     *,
     local_directory: str,
-    start_date: datetime.datetime | np.datetime64 | str,
+    start_date: datetime.date | np.datetime64 | str,
     end_date: datetime.datetime | np.datetime64 | str,
     data_variables: list[ms.ERA5] = DEFAULT_VARIABLES,
 ) -> int:
