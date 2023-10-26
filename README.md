@@ -1,6 +1,20 @@
 # Mesoscaler
 
+This code is intended for resampling multiple atmospheric datasets that have a
+representation of longitude, latitude, time, and an optional Isobaric
+vertical dimension. If the data does not contain a vertical dimension it is
+assumed to be a derivate of the atmosphere.
+
+## Installation
+
+```bash
+pip install .
+```
+
 ## Strict xarray dataset coordinate and dimension conventions
+
+A concrete dimension and coordinate convention is used to ensure that the
+data is resampled correctly in the form of enums. The convention is as follows:
 
 ```python
 >>> import mesoscaler as ms
@@ -19,6 +33,10 @@ Coordinates:
 >>> ms.Coordinates.loc[['longitude', 'latitude']]
 [longitude, latitude]
 >>> ms.Coordinates.longitude.axis
+(Y, X)
+```
+
+```python
 >>> class MyData(ms.DependentVariables):
 ...     u_component_of_wind = 'u'
 ... 
@@ -60,29 +78,6 @@ of this package but it does have compatibility.
 The `pipeline` function is just an simple interface to the underlying `DependentDataset`, `ReSampler`, and `DataGenerator` classes.
 
 The `DataGenerator` uses `thread` and `Queue` to generate batches of data in parallel.
-
-```python
-import functools
-from torch.utils.data import DataLoader
-import mesoscaler as ms
-
-pipeline = ms.pipeline(
-    [
-        ("tests/data/urma.zarr", [ms.URMA.U10, ms.URMA.V10]),
-        ("tests/data/era5.zarr", [ms.ERA5.U, ms.ERA5.V]),
-    ],
-    functools.partial(
-        ms.BoundedBoxSampler,
-        bbox=(-120, 30.0, -70, 25.0),
-    ),
-        
-)
-
-
-for i, batch in enumerate(DataLoader(pipeline, batch_size=12)):
-    print(batch.shape)
-    break
-```
 
 ```text
 torch.Size([12, 2, 2, 6, 80, 80])

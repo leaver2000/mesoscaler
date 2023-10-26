@@ -7,8 +7,7 @@ import numpy as np
 import pytest
 import xarray as xr
 
-import src.mesoscaler as mesoscaler
-from src.mesoscaler import time as TIME
+import src.mesoscaler as ms
 
 here = os.path.abspath(os.path.dirname(__file__))
 data = os.path.abspath(os.path.join(here, "data"))
@@ -19,25 +18,30 @@ assert os.path.exists(era5_store)
 
 
 @pytest.fixture
-def data_paths() -> list[tuple[str, list[mesoscaler.URMA] | list[mesoscaler.ERA5]]]:
-    items = {urma_store: mesoscaler.URMA.loc[["T2M", "U10", "V10"]], era5_store: mesoscaler.ERA5.loc[["U", "V", "T"]]}  # type: ignore
-    return list(mesoscaler.utils.items(items))
+def data_paths() -> list[tuple[str, list[ms.URMA] | list[ms.ERA5]]]:
+    items = {urma_store: ms.URMA.loc[["T2M", "U10", "V10"]], era5_store: ms.ERA5.loc[["U", "V", "T"]]}
+    return list(ms.utils.chain_items(items))
 
 
-@pytest.fixture
-def dataset_sequence(data_paths) -> mesoscaler.DatasetSequence:
-    urma = []
-    era5 = []
+@pytest.fixture()
+def dataset_sequence(data_paths) -> ms.DatasetSequence:
+    urma = []  # type: list[ms.DependentDataset]
+    era5 = []  # type: list[ms.DependentDataset]
     for i in range(10):
-        u, _ = mesoscaler.open_datasets(data_paths)
-        u[TIME] = u[TIME].to_numpy() + np.timedelta64(datetime.timedelta(hours=i))
+        u, _ = ms.open_datasets(data_paths)
+        u[ms.time] = u[ms.time].to_numpy() + np.timedelta64(datetime.timedelta(hours=i))
 
         urma.append(u)
     for i in range(10):
         i -= 5
-        _, e = mesoscaler.open_datasets(data_paths)
+        _, e = ms.open_datasets(data_paths)
 
-        e[TIME] = e[TIME].to_numpy() + np.timedelta64(datetime.timedelta(hours=i))
+        e[ms.time] = e[ms.time].to_numpy() + np.timedelta64(datetime.timedelta(hours=i))
         era5.append(e)
 
-    return mesoscaler.DatasetSequence([xr.concat(urma, dim=TIME), xr.concat(era5, dim=TIME)])
+    return ms.DatasetSequence(
+        [
+            xr.concat(urma, dim=ms.time).chunk({ms.time: 1}),
+            xr.concat(era5, dim=ms.time).chunk({ms.time: 1}),
+        ]
+    )

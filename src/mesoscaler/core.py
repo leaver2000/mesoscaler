@@ -11,21 +11,24 @@ import xarray.core.formatting_html
 from pyresample.geometry import GridDefinition
 from xarray.core.coordinates import DatasetCoordinates
 
-from . import display
+try:
+    import matplotlib.pyplot as _plt
+except ImportError:
+    _plt = None  # type: ignore
+from . import utils
 from ._typing import (
     N4,
     Any,
     Array,
-    CanBeItems,
+    ChainableItems,
     Final,
     Hashable,
     Iterable,
-    Latitude,
     ListLike,
     Literal,
-    Longitude,
     Mapping,
     N,
+    NamedTuple,
     Nt,
     Number,
     Nv,
@@ -48,19 +51,17 @@ from .enums import (
     Coordinates,
     DependentVariables,
     Dimensions,
-    DimensionsMapType,
     T,
     X,
     Y,
     Z,
 )
 from .generic import Data, DataWorker
-from .sampling.domain import UNITS, DatasetSequence, Domain
+from .sampling.domain import DatasetSequence, Domain
 from .sampling.resampler import AbstractResampler, ReSampler
-from .utils import items, join_kv, log_scale, sort_unique
 
 Depends: TypeAlias = Union[type[DependentVariables], DependentVariables, Sequence[DependentVariables], "Dependencies"]
-Unit = Literal["km", "m"]
+
 # =====================================================================================================================
 # - hPa scaling -
 DEFAULT_PRESSURE_BASE = STANDARD_SURFACE_PRESSURE = P0 = 1013.25  # - hPa
@@ -81,7 +82,6 @@ DERIVED_SURFACE_COORDINATE = {LVL: (LVL.axis, [STANDARD_SURFACE_PRESSURE])}
 """If the Dataset does not contain a vertical coordinate, it is assumed to be a derived atmospheric parameter
 or near surface parameter. The vertical coordinate is then set to the standard surface pressure of 1013.25 hPa."""
 
-_units: Mapping[Unit, float] = {"km": 1.0, "m": 1000.0}
 
 _GRID_DEFINITION_ATTRIBUTE = "grid_definition"
 _DEPENDS = "depends"
@@ -140,6 +140,14 @@ class Dependencies:
 # =====================================================================================================================
 # - Resampling
 # =====================================================================================================================
+Unit = Literal["km", "m"]
+
+
+class Units(NamedTuple):
+    xy: Unit
+    z: str
+
+
 class Mesoscale(Data[Array[[...], np.float_]]):
     def __init__(
         self,
@@ -149,28 +157,23 @@ class Mesoscale(Data[Array[[...], np.float_]]):
         rate: float = DEFAULT_SCALE_RATE,
         levels: ListLike[Number] = DEFAULT_LEVELS,
         troposphere: ListLike[Number] | None = None,
-        xy_units: str = "km",
+        xy_units: Unit = "km",
         z_units: str = "hPa",
     ) -> None:
-        if xy_units not in UNITS[X, Y]:
-            raise ValueError(f"units must be one of {UNITS[X, Y]}")
-        if z_units not in UNITS[Z]:
-            raise ValueError(f"units must be one of {UNITS[Z]}")
-
         super().__init__()
         # - descending pressure
         tropo = np.asarray(
-            sort_unique(self._arange() if troposphere is None else troposphere, descending=True), dtype=np.float_
+            utils.sort_unique(self._arange() if troposphere is None else troposphere, descending=True), dtype=np.float_
         )
-        self._levels = lvls = np.asarray(sort_unique(levels, descending=True), dtype=np.float_)
+        self._levels = lvls = np.asarray(utils.sort_unique(levels, descending=True), dtype=np.float_)
         if not all(np.isin(lvls, tropo)):
             raise ValueError(f"pressure {lvls} must be a subset of troposphere {tropo}")
 
         # - ascending scale
         mask = np.isin(tropo, lvls)
-        self._scale = scale = log_scale(tropo, rate=rate)[::-1][mask]
+        self._scale = scale = utils.log_scale(tropo, rate=rate)[::-1][mask]
         self._dx, self._dy = scale[np.newaxis] * np.array([[dx], [dy or dx]])
-        self._units: DimensionsMapType[str] = {(X, Y): xy_units, Z: z_units}
+        self._units = Units(xy=xy_units, z=z_units)
 
     @staticmethod
     def _arange(
@@ -199,7 +202,7 @@ class Mesoscale(Data[Array[[...], np.float_]]):
     ) -> Mesoscale:
         return cls(dx, dy, rate=rate, levels=levels, troposphere=cls._arange(start, stop, step, p0=p0, p1=p1))
 
-    #  - properties - #
+    #  - properties
     @property
     def levels(self) -> Array[[N], np.float_]:
         return self._levels
@@ -217,7 +220,7 @@ class Mesoscale(Data[Array[[...], np.float_]]):
         return self._dy
 
     @property
-    def unit(self) -> DimensionsMapType[str]:
+    def units(self) -> Units:
         return self._units
 
     @property
@@ -229,33 +232,16 @@ class Mesoscale(Data[Array[[...], np.float_]]):
         )  # type: ignore
 
     @property
-    def plot(self) -> display.PlotAccessor:
-        return display.PlotAccessor(self)
-
-    @property
     def area_extent(self) -> Array[[N, N4], np.float_]:
         xy = np.c_[self.dx, self.dy]
         return np.c_[-xy, xy]
 
-    #  - array methods - #
-    def __array__(self) -> Array[[N, N4], np.float_]:
-        return self.area_extent
-
-    def to_numpy(self, *, units: Unit = "km") -> Array[[N, N4], np.float_]:
-        return self.area_extent * _units[units]
-
-    def to_pandas(self) -> pd.DataFrame:
-        df = pd.DataFrame(
-            np.asarray(self), columns=["dx0", "dy0", "dx1", "dy1"], index=pd.Index(self.levels, name="pressure")
-        )
-        df.insert(0, "scale", self.scale)
-        return df.sort_index()
-
+    #  - dunder methods
     def __repr__(self) -> str:
         name = self.name
         size = self.size
-        xy, z = self.unit.values()
-        return join_kv(
+        xy, z = self.units
+        return utils.join_kv(
             f"{name}({size=}):",
             ("scale", self.scale),
             (f"levels[{z}]", self.levels),
@@ -265,7 +251,29 @@ class Mesoscale(Data[Array[[...], np.float_]]):
     def __len__(self) -> int:
         return len(self.levels)
 
-    # - methods - #
+    def __array__(self) -> Array[[N, N4], np.float_]:
+        return self.area_extent
+
+    # - methods
+    def to_numpy(self, *, units: Unit = "km") -> Array[[N, N4], np.float_]:
+        u = self.units.xy
+        x = self.area_extent
+        if u == units:
+            return x
+        elif u == "km":
+            return x * 1000.0
+        elif u == "m":
+            return x / 1000.0
+
+        raise ValueError(f"units {u} is not supported!")
+
+    def to_pandas(self) -> pd.DataFrame:
+        df = pd.DataFrame(
+            np.asarray(self), columns=["dx0", "dy0", "dx1", "dy1"], index=pd.Index(self.levels, name="pressure")
+        )
+        df.insert(0, "scale", self.scale)
+        return df.sort_index()
+
     def get_domain(self, dsets: Iterable[DependentDataset]) -> Domain:
         return Domain(dsets, self)
 
@@ -278,9 +286,8 @@ class Mesoscale(Data[Array[[...], np.float_]]):
         width: int = 80,
         method: str = "nearest",
     ) -> ReSampler:
-        return ReSampler(
-            __x if isinstance(__x, Domain) else self.get_domain(__x), height=height, width=width, method=method
-        )
+        domain = __x if isinstance(__x, Domain) else self.get_domain(__x)
+        return ReSampler(domain, height=height, width=width, method=method)
 
     def produce(
         self,
@@ -295,28 +302,41 @@ class Mesoscale(Data[Array[[...], np.float_]]):
         resampler = self.resample(__x, height=height, width=width, method=method)
         return DataProducer(indices, resampler=resampler)
 
+    def plot(self) -> None:
+        if _plt is None:
+            raise ImportError("matplotlib is not installed")
+        X1, X2, Y = self.dx, self.dy, self.levels
+        fig = _plt.figure(figsize=(15, 6))
+        ax = fig.add_subplot(121)
+        ax.invert_yaxis()
+        ax.plot(X1, Y, linestyle="-", linewidth=0.75, marker=".", markersize=2.5)
+        ax.plot(X2, Y, linestyle="-", linewidth=0.75, marker=".", markersize=2.5)
+        ax.set_ylabel("Pressure (hPa)")
+        ax.set_xlabel("Extent (km)")
+        ax.legend(["dx", "dy"])
+
+        df = self.to_pandas()
+        ax2 = fig.add_subplot(122)
+        ax2.axis("off")
+        ax2.table(
+            cellText=df.to_numpy().round(2).astype(str).tolist(),
+            rowLabels=df.index.tolist(),
+            bbox=[0, 0, 1, 1],  # type: ignore
+            colLabels=df.columns.tolist(),
+        )
+
 
 # =====================================================================================================================
 class DataProducer(DataWorker[PointOverTime, Array[[Nv, Nt, Nz, Ny, Nx], np.float_]], AbstractResampler):
     def __init__(self, indices: Iterable[PointOverTime], resampler: ReSampler) -> None:
         super().__init__(indices, resampler=resampler)
 
+    # - AbstractResampler -
     @functools.cached_property
     def resampler(self) -> ReSampler:
         return self.attrs["resampler"]
 
-    # - AbstractDomain - #
-    @property
-    def domain(self) -> Domain:
-        return self.resampler.domain
-
-    # - AbstractReSampler - #
-    def vstack(
-        self, longitude: Longitude, latitude: Latitude, time: Array[[N], np.datetime64]
-    ) -> Array[[Nz, Ny, Nx, Nv | Nt], np.float_]:
-        return self.resampler.vstack(longitude, latitude, time)
-
-    # - Mapping Interface - #
+    # - Mapping Interface -
     def __getitem__(self, idx: PointOverTime) -> Array[[Nv, Nt, Nz, Ny, Nx], np.float_]:
         (lon, lat), time = idx
         return self(lon, lat, time)
@@ -496,9 +516,9 @@ class DependentDataset(IndependentDataset):
 #  - functions
 # =====================================================================================================================
 def _open_datasets(
-    paths: CanBeItems[StrPath, Depends], *, levels: ListLike[Number] | None = None, times: Any = None
+    paths: ChainableItems[StrPath, Depends], *, levels: ListLike[Number] | None = None, times: Any = None
 ) -> Iterable[DependentDataset]:
-    for path, depends in items(paths):
+    for path, depends in utils.chain_items(paths):
         ds = DependentDataset.from_zarr(path, depends)
         if levels is not None and times is not None:
             ds = ds.sel({LVL: ds.level.isin(levels), TIME: ds.time.isin(times)})
@@ -511,6 +531,6 @@ def _open_datasets(
 
 
 def open_datasets(
-    paths: CanBeItems[StrPath, Depends], *, levels: ListLike[Number] | None = None, times: Any = None
+    paths: ChainableItems[StrPath, Depends], *, levels: ListLike[Number] | None = None, times: Any = None
 ) -> DatasetSequence:
     return DatasetSequence(_open_datasets(paths, levels=levels, times=times))

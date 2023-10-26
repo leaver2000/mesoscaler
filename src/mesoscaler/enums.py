@@ -1,12 +1,7 @@
 """A mix of Abstract Base Classes and Generic Data Adapters for various data structures."""
 from __future__ import annotations
 
-from typing import Literal, Mapping, TypeVar
-
 from ._metadata import DependentVariables, IndependentVariables, auto_field
-from ._typing import Literal, Mapping, TypeAlias, TypeVar
-
-_T = TypeVar("_T")
 
 
 class Dimensions(IndependentVariables):
@@ -22,7 +17,6 @@ DIMENSIONS = T, Z, Y, X = (
     Dimensions.Y,
     Dimensions.X,
 )
-DimensionsMapType: TypeAlias = Mapping[tuple[Literal[X], Literal[Y]] | Literal[Z] | Literal[T], _T]  # type: ignore[valid-type]
 
 
 class Coordinates(IndependentVariables):

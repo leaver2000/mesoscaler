@@ -12,7 +12,7 @@ from ._typing import (
     Array,
     ArrayLike,
     Callable,
-    CanBeItems,
+    ChainableItems,
     Hashable,
     HashableT,
     Iterable,
@@ -61,7 +61,7 @@ DataValue: TypeAlias = ArrayLike | xr.DataArray | xr.Dataset | DependentDataset
 
 
 def _open_datasets(
-    datasets: Iterable[DependentDataset] | CanBeItems[StrPath, Depends], **kwargs: Any
+    datasets: Iterable[DependentDataset] | ChainableItems[StrPath, Depends], **kwargs: Any
 ) -> DatasetSequence:
     if isinstance(datasets, DatasetSequence):
         return datasets
@@ -97,7 +97,7 @@ def coordinates(__data: Any | None = None, /, **kwargs: Any) -> xr.Coordinates:
         vertical   (Z) float64 1.013e+03
     """
 
-    data = {Coordinates(k): v for k, v in utils.items(__data or kwargs)}
+    data = {Coordinates(k): v for k, v in utils.chain_items(__data or kwargs)}
 
     lon, lat = (np.asanyarray(data[x]).astype(np.float_) for x in (LON, LAT))
     if lon.ndim != lat.ndim:
@@ -182,7 +182,7 @@ def dataset_sequence(
 
 
 def resampler(
-    dsets: Iterable[DependentDataset] | CanBeItems[StrPath, Depends],
+    dsets: Iterable[DependentDataset] | ChainableItems[StrPath, Depends],
     dx: float = DEFAULT_DX,
     dy: float | None = None,
     start: int = DEFAULT_LEVEL_START,
@@ -197,13 +197,13 @@ def resampler(
     width: int = DEFAULT_WIDTH,
     method: str = DEFAULT_RESAMPLE_METHOD,
 ) -> ReSampler:
+    dsets = _open_datasets(dsets, levels=levels)
     scale = Mesoscale.arange(dx, dy, start, stop, step, p0=p0, p1=p1, rate=rate, levels=levels)
-    dsets = _open_datasets(dsets, levels=levels).fit(scale)
     return scale.resample(dsets, height=height, width=width, method=method)
 
 
 def producer(
-    dsets: Iterable[DependentDataset] | CanBeItems[StrPath, Depends],
+    dsets: Iterable[DependentDataset] | ChainableItems[StrPath, Depends],
     indices: Iterable[PointOverTime] | Callable[[Domain], Iterable[PointOverTime]] = LinearSampler,
     *,
     dx: float = DEFAULT_DX,
@@ -247,7 +247,7 @@ def producer(
 
 
 def generator(
-    dsets: Iterable[DependentDataset] | CanBeItems[StrPath, Depends],
+    dsets: Iterable[DependentDataset] | ChainableItems[StrPath, Depends],
     indices: Iterable[PointOverTime] | Callable[[Domain], Iterable[PointOverTime]] = LinearSampler,
     *,
     dx: float = DEFAULT_DX,
@@ -292,7 +292,7 @@ def generator(
 
 
 def loader(
-    dsets: Iterable[DependentDataset] | CanBeItems[StrPath, Depends],
+    dsets: Iterable[DependentDataset] | ChainableItems[StrPath, Depends],
     indices: Iterable[PointOverTime] | Callable[[Domain], Iterable[PointOverTime]] = LinearSampler,
     *,
     dx: float = DEFAULT_DX,
