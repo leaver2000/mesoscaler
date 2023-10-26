@@ -36,8 +36,8 @@ DEFAULT_VARIABLES = [
 def main(
     *,
     local_directory: str,
-    start_date: datetime.date | np.datetime64 | str,
-    end_date: datetime.datetime | np.datetime64 | str,
+    start_date: datetime.date | datetime.datetime | np.datetime64 | str,
+    end_date: datetime.date | datetime.datetime | np.datetime64 | str,
     data_variables: list[ms.ERA5] = DEFAULT_VARIABLES,
 ) -> int:
     time = np.s_[ms.days.datetime(start_date) : ms.days.datetime(end_date) + ms.days.delta(1)]

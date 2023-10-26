@@ -1,21 +1,5 @@
 from __future__ import annotations
 
-__all__ = [
-    "normalize",
-    "normalized_scale",
-    "sort_unique",
-    "arange_slice",
-    "interp_frames",
-    "square_space",
-    "url_join",
-    "dump_json",
-    "dump_jsonl",
-    "dump_toml",
-    "iter_jsonl",
-    "load_json",
-    "load_toml",
-    "tqdm",
-]
 import enum
 import functools
 import itertools
@@ -39,10 +23,10 @@ except (NameError, ImportError):
 
 from ._typing import (
     Any,
-    AnyArrayLike,
     Array,
+    ArrayLike,
     Callable,
-    CanBeItems,
+    ChainableItems,
     GenericAliasType,
     Hashable,
     Iterable,
@@ -73,7 +57,7 @@ NoDefault = __NoDefault.NoDefault
 LiteralNoDefault = Literal[__NoDefault.NoDefault]
 del __NoDefault
 
-_T1 = TypeVar("_T1", bound=Any)
+_T1 = TypeVar("_T1")
 _T2 = TypeVar("_T2")
 
 
@@ -100,24 +84,8 @@ def is_function(x: Any) -> TypeGuard[function]:
     return isinstance(x, types.FunctionType)
 
 
-def is_enumtype(x: Any) -> TypeGuard[type[enum.Enum]]:
-    return isinstance(x, type) and issubclass(x, enum.Enum)
-
-
-def is_exception(x: Any) -> TypeGuard[type[Exception]]:
-    return isinstance(x, type) and issubclass(x, BaseException)
-
-
-def is_hashable(x: Any) -> TypeGuard[Hashable]:
-    return isinstance(x, Hashable)
-
-
 def is_scalar(x: Any) -> TypeGuard[np.generic | bool | int | float | complex | str | bytes | memoryview | enum.Enum]:
     return np.isscalar(x) or isinstance(x, enum.Enum)
-
-
-def is_array_like(x: Any) -> TypeGuard[AnyArrayLike]:
-    return hasattr(x, "ndim") and not is_scalar(x)
 
 
 def is_named_tuple(x: Any) -> TypeGuard[NamedTuple]:
@@ -130,14 +98,6 @@ def is_pair(x: Any, strict: bool = False) -> TypeGuard[Pair[Any]]:
         y, z = x
         condition &= type(y) == type(z)
     return condition
-
-
-def is_null(value: Any) -> bool:
-    """
-    Check if value is NaN or None
-    """
-    # pylint: disable=comparison-with-itself
-    return value != value or value is None
 
 
 # =====================================================================================================================
@@ -228,65 +188,50 @@ def log_scale(x: NDArray[np.number[Any]], rate: float = 1.0) -> NDArray[np.float
     return normalized_scale(np.log(x), rate=rate)
 
 
-def square_space(in_size: int, out_size: int) -> tuple[Pair[Array[[N], Any]], Pair[Array[[N, N], Any]]]:
-    """
-    >>> points, values = squarespace(4, 6)
-    >>> points
-    (array([0.        , 0.08333333, 0.16666667, 0.25      ]), array([0.        , 0.08333333, 0.16666667, 0.25      ]))
-    >>> grid
-    (array([[0.  , 0.  , 0.  , 0.  , 0.  , 0.  ],
-           [0.05, 0.05, 0.05, 0.05, 0.05, 0.05],
-           [0.1 , 0.1 , 0.1 , 0.1 , 0.1 , 0.1 ],
-           [0.15, 0.15, 0.15, 0.15, 0.15, 0.15],
-           [0.2 , 0.2 , 0.2 , 0.2 , 0.2 , 0.2 ],
-           [0.25, 0.25, 0.25, 0.25, 0.25, 0.25]]), array([[0.  , 0.05, 0.1 , 0.15, 0.2 , 0.25],
-           [0.  , 0.05, 0.1 , 0.15, 0.2 , 0.25],
-           [0.  , 0.05, 0.1 , 0.15, 0.2 , 0.25],
-           [0.  , 0.05, 0.1 , 0.15, 0.2 , 0.25],
-           [0.  , 0.05, 0.1 , 0.15, 0.2 , 0.25],
-           [0.  , 0.05, 0.1 , 0.15, 0.2 , 0.25]]))
-    """
-    xy1 = np.linspace(0, 1.0 / in_size, in_size)
-    xy2 = np.linspace(0, 1.0 / in_size, out_size)
-    return (xy1, xy1), tuple(np.meshgrid(xy2, xy2, indexing="ij"))  # type: ignore[return-value]
-
-
-def interp_frames(
-    arr: Array[[N, N, ...], _T1], *, img_size: int = 256, method: str = "linear"
-) -> Array[[N, N, ...], _T1]:
-    """
-    Interpolate the first two equally shaped dimensions of an array to the new `patch_size`.
-    using `scipy.interpolate.RegularGridInterpolator`.
-
-    >>> import numpy as np
-    >>> import atmoformer.utils
-    >>> arr = np.random.randint(0, 255, (384, 384, 49))
-    >>> atmoformer.utils.interpatch(arr, 768).shape
-    (768, 768, 49)
-    """
-    from scipy.interpolate import RegularGridInterpolator  # type: ignore[import]
-
-    x, y = arr.shape[:2]
-    if x != y:  # first two dimensions must be equal
-        raise ValueError(f"array must be square, but got shape: {arr.shape}")
-    elif x == img_size == y:  # no interpolation needed
-        return arr  # pyright: ignore
-    points, values = square_space(x, img_size)
-    interp = RegularGridInterpolator(points, arr, method=method)
-    return interp(values).astype(arr.dtype)
-
-
-def overlapping(data: Sequence[Array[[N], NumpyGeneric_T]], sort: bool = True) -> Array[[N], NumpyGeneric_T]:
-    # TODO: need to check if the function below is equivalent to this function
-    # import functools
-    # import numpy as np
-    # f = functools.reduce(np.intersect1d, data)
-
-    x = np.unique(np.concatenate(data))
-    mask = np.stack([np.isin(x, y) for y in data], axis=1).all(axis=1)
-    x = x[mask]
+def nd_union(__x: Iterable[ArrayLike[NumpyGeneric_T]], /, *, sort: bool = False) -> Array[[N], NumpyGeneric_T]:
+    x = np.asarray(functools.reduce(np.union1d, __x))
     if sort:
         x.sort()
+    return x
+
+
+def nd_intersect(__x: Iterable[ArrayLike[NumpyGeneric_T]], /, *, sort: bool = False) -> Array[[N], NumpyGeneric_T]:
+    """
+    >>> x = ms.hours.batch("2022-01-01", "2023-01-02", 3, size=4)
+    >>> y = ms.hours.batch("2023-01-01", "2023-02-01", 3, size=4)
+    >>> z = ms.hours.batch("2023-01-01", "2023-03-01", 3, size=4)
+    >>> ms.utils.nd_intersect([x, y, z], sort=True)
+    array(['2023-01-01T00', '2023-01-01T03', '2023-01-01T06', '2023-01-01T09',
+       '2023-01-01T12', '2023-01-01T15', '2023-01-01T18', '2023-01-01T21'],
+      dtype='datetime64[h]')
+    """
+    x = np.asarray(functools.reduce(np.intersect1d, __x))
+    if sort:
+        x.sort()
+    return x
+
+
+@overload
+def sort_unique(
+    __x: Array[[...], NumpyNumber_T], /, *, descending: bool = False, axis: int | None = None
+) -> Array[[...], NumpyNumber_T]:
+    ...
+
+
+@overload
+def sort_unique(__x: ListLike[Number_T], /, *, descending: bool = False) -> list[Number_T]:
+    ...
+
+
+def sort_unique(
+    __x: Iterable[Number_T] | Array[[...], NumpyNumber_T], /, *, descending: bool = False, axis: int | None = None
+) -> list[Number_T] | Array[[...], NumpyNumber_T]:
+    x = (
+        np.sort(np.unique(__x, axis=axis)) if isinstance(__x, np.ndarray) else sorted(set(__x))
+    )  # type: list[Number_T] | Array[[...], NumpyNumber_T]
+
+    if descending:
+        x = x[::-1]
     return x
 
 
@@ -351,7 +296,6 @@ class Representation(str):
         return super().__new__(cls, x)
 
 
-# repr_: Final = Representation
 @overload
 def repr_(x: Any, *, none: Any = None, map_values: Literal[False] = False) -> Representation:
     ...
@@ -401,120 +345,15 @@ def join_kv(
     return sep.join([head, text])
 
 
-@overload
-def sort_unique(
-    __x: Array[[...], NumpyNumber_T], /, *, descending=False, axis: int | None = None
-) -> Array[[...], NumpyNumber_T]:
-    ...
-
-
-@overload
-def sort_unique(__x: ListLike[Number_T], /, *, descending=False) -> list[Number_T]:
-    ...
-
-
-def sort_unique(
-    __x: Iterable[Number_T] | Array[[...], NumpyNumber_T],
-    /,
-    *,
-    descending=False,
-    axis: int | None = None,
-) -> list[Number_T] | Array[[...], NumpyNumber_T]:
-    x = (
-        np.sort(np.unique(__x, axis=axis)) if isinstance(__x, np.ndarray) else sorted(set(__x))
-    )  # type: list[Number_T] | Array[[...], NumpyNumber_T]
-
-    if descending:
-        x = x[::-1]
-    return x
-
-
-# =====================================================================================================================
-# - list utils
-# =====================================================================================================================
-def arange_slice(
-    start: int, stop: int | None, rows: int | None, ppad: int | None, step: int | None = None
-) -> list[slice]:
-    if stop is None:
-        start, stop = 0, start
-    if ppad == 0:
-        ppad = None
-    elif stop < start:
-        raise ValueError(f"stop ({stop}) must be less than start ({start})")
-
-    stop += 1  # stop is exclusive
-
-    if rows is None:
-        rows = 1
-
-    if ppad is not None:
-        if ppad > rows:
-            raise ValueError(f"pad ({ppad}) must be less than freq ({rows})")
-        it = zip(range(start, stop, rows // ppad), range(start + rows, stop, rows // ppad))
-    else:
-        it = zip(range(start, stop, rows), range(start + rows, stop, rows))
-    return [np.s_[i:j:step] for i, j in it if j <= stop]
-
-
 # =====================================================================================================================
 # - iterable utils
 # =====================================================================================================================
 SizedIterFunc = Callable[[Iterable[Sized]], _T1]
-map_size: SizedIterFunc[map[int]] = lambda x: map(len, x)
-acc_size: SizedIterFunc[itertools.accumulate[int]] = lambda x: itertools.accumulate(map_size(x))
+map_size: functools.partial[map[int]] = functools.partial(map, len)
+acc_size: SizedIterFunc[Iterable[int]] = lambda x: itertools.accumulate(map_size(x))
 max_size: SizedIterFunc[int] = lambda x: max(map_size(x))
 min_size: SizedIterFunc[int] = lambda x: min(map_size(x))
 sum_size: SizedIterFunc[int] = lambda x: sum(map_size(x))
-
-
-@overload
-def find(__func: Callable[[_T1], bool], __x: Iterable[_T1]) -> _T1:
-    ...
-
-
-@overload
-def find(__func: Callable[[_T1], bool], __x: Iterable[_T1], /, *, default: _T2) -> _T1 | _T2:
-    ...
-
-
-def find(
-    __func: Callable[[_T1], bool], __x: Iterable[_T1], /, *, default: _T2 | LiteralNoDefault = NoDefault
-) -> _T1 | _T2:
-    try:
-        return next(filter(__func, __x))
-    except StopIteration as e:
-        if default is not NoDefault:
-            return default
-        raise ValueError(f"no element in {__x} satisfies {__func}") from e
-
-
-def squish_iter(x: _T1 | Iterable[_T1]) -> Iterator[_T1]:
-    """
-
-    >>> list(squish_iter((1,2,3,4)))
-    [1, 2, 3, 4]
-    >>> list(squish_iter('hello'))
-    ['hello']
-    >>> list(squish_iter(['hello', 'world']))
-    ['hello', 'world']
-    """
-    if not isinstance(x, Iterable):
-        raise TypeError(f"expected an iterable, but got {type(x)}")
-    return iter([x] if isinstance(x, str) else x)  # type: ignore
-
-
-def squish_chain(__iterable: _T1 | Iterable[_T1], /, *args: _T1) -> itertools.chain[_T1]:
-    return itertools.chain(squish_iter(__iterable), iter(args))
-
-
-def squish_map(__func: Callable[[_T1], _T2], __iterable: _T1 | Iterable[_T1], /, *args: _T1) -> map[_T2]:
-    """
-    >>> assert list(squish_map(lambda x: x, "foo", "bar", "baz")) == ["foo", "bar", "baz"]
-    >>> assert list(squish_map(str, range(3), 4, 5)) == ["0", "1", "2", "4", "5"]
-    >>> assert list(squish_map("hello {}".format, (x for x in ("foo", "bar")), "spam")) == ["hello foo", "hello bar", "hello spam"]
-    """
-
-    return map(__func, squish_chain(__iterable, *args))
 
 
 def iter_pair(x: Pair[Any] | Iterable[Pair[Any]]) -> Iterator[Pair[Any]]:
@@ -525,36 +364,42 @@ def iter_pair(x: Pair[Any] | Iterable[Pair[Any]]) -> Iterator[Pair[Any]]:
 
 
 @overload
-def items(x: tuple[_T1, _T2], /, *args: tuple[_T1, _T2]) -> itertools.chain[tuple[_T1, _T2]]:
+def chain_items(__x: tuple[_T1, _T2], /, *args: tuple[_T1, _T2]) -> itertools.chain[tuple[_T1, _T2]]:
     ...
 
 
 @overload
-def items(x: CanBeItems[_T1, _T2], /, *args: tuple[_T1, _T2]) -> itertools.chain[tuple[_T1, _T2]]:
+def chain_items(__x: ChainableItems[_T1, _T2], /, *args: tuple[_T1, _T2]) -> itertools.chain[tuple[_T1, _T2]]:
     ...
 
 
 @overload
-def items(x: CanBeItems[str, _T2], /, *args: tuple[str, _T2], **kwargs: _T2) -> itertools.chain[tuple[str, _T2]]:
+def chain_items(
+    __x: ChainableItems[str, _T2], /, *args: tuple[str, _T2], **kwargs: _T2
+) -> itertools.chain[tuple[str, _T2]]:
     ...
 
 
-def items(
-    x: tuple[_T1 | str, _T2] | CanBeItems[_T1 | str, _T2], /, *args: tuple[_T1 | str, _T2], **kwargs: _T2
-) -> itertools.chain[tuple[_T1, _T2]] | itertools.chain[tuple[str, _T2]]:
+def chain_items(
+    __x: tuple[_T1, _T2] | ChainableItems[_T1, _T2], /, *args: tuple[_T1, _T2], **kwargs: _T2
+) -> itertools.chain[tuple[Any, Any]]:
     """
     >>> assert (
-        list(utils.items({"a": 1, "b": 2}))
-        == list(utils.items([("a", 1), ("b", 2)]))
-        == list(utils.items(("a", 1), ("b", 2)))
-        == list(utils.items(zip("ab", (1, 2))))
+        list(utils.chain_items({"a": 1, "b": 2}))
+        == list(utils.chain_items([("a", 1), ("b", 2)]))
+        == list(utils.chain_items(("a", 1), ("b", 2)))
+        == list(utils.chain_items(zip("ab", (1, 2))))
         == [("a", 1), ("b", 2)]
     )
     """
-    if isinstance(x, tuple):
-        x = iter_pair(x)
+    if isinstance(__x, tuple):
+        x = iter_pair(__x)
+    elif isinstance(__x, Mapping):
+        x = __x.items()
+    else:
+        x = __x
 
-    return itertools.chain((x.items() if isinstance(x, Mapping) else x), args, kwargs.items())
+    return itertools.chain(x, args, kwargs.items())
 
 
 # =====================================================================================================================

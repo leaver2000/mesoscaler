@@ -80,7 +80,7 @@ class AbstractResampler(AbstractDomain, abc.ABC):
     ) -> Array[[Nv, Nt, Nz, Ny, Nx], np.float_]:
         """stack the data along `Nz` -> unsqueeze the variables & time -> reshape the data to match the expected output."""
 
-        arr = self.resampler.vstack(longitude, latitude, time)  # (Z, Y, X, C*T)
+        arr = self.resampler.zstack(longitude, latitude, time)  # (Z, Y, X, C*T)
         z, y, x = arr.shape[:3]
         # unsqueeze C
         arr = arr.reshape((z, y, x, -1, time.size))  # (Z, Y, X, C, T)
@@ -110,11 +110,6 @@ class ReSampler(AbstractResampler):
     @property
     def resampler(self) -> ReSampler:
         return self
-
-    def vstack(
-        self, longitude: Longitude, latitude: Latitude, time: Array[[N], np.datetime64]
-    ) -> Array[[Nz, Ny, Nx, Nv | Nt], np.float_]:
-        return np.stack(self._resample_point_over_time(longitude, latitude, time))  # (Z, Y, X, C*T)
 
     def __init__(
         self,
@@ -158,6 +153,11 @@ class ReSampler(AbstractResampler):
             projection={"proj": self.proj, "lon_0": longitude, "lat_0": latitude},
         )
 
+    def zstack(
+        self, longitude: Longitude, latitude: Latitude, time: Array[[N], np.datetime64]
+    ) -> Array[[Nz, Ny, Nx, Nv | Nt], np.float_]:
+        return np.stack(self._resample_point_over_time(longitude, latitude, time))  # (Z, Y, X, C*T)
+
     def _resample_point_over_time(
         self, longitude: Longitude, latitude: Latitude, time: Array[[N], np.datetime64]
     ) -> list[Array[[Ny, Nx, N], np.float_]]:
@@ -176,7 +176,7 @@ class ReSampler(AbstractResampler):
                 ds.sel({TIME: time}).to_stacked_array("C", [Y, X]).to_numpy(),
                 area_definition(area_extent=area_extent),
             )
-            for ds, area_extent in self.domain.iter_dataset_and_extent()
+            for ds, area_extent in self.iter_dataset_and_extent()
         ]
 
     @property

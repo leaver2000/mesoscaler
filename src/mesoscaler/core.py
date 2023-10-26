@@ -11,19 +11,18 @@ import xarray.core.formatting_html
 from pyresample.geometry import GridDefinition
 from xarray.core.coordinates import DatasetCoordinates
 
-from . import display
+# from .utils import chain_items, join_kv, log_scale, sort_unique
+from . import display, utils
 from ._typing import (
     N4,
     Any,
     Array,
-    CanBeItems,
+    ChainableItems,
     Final,
     Hashable,
     Iterable,
-    Latitude,
     ListLike,
     Literal,
-    Longitude,
     Mapping,
     N,
     Nt,
@@ -57,7 +56,6 @@ from .enums import (
 from .generic import Data, DataWorker
 from .sampling.domain import UNITS, DatasetSequence, Domain
 from .sampling.resampler import AbstractResampler, ReSampler
-from .utils import items, join_kv, log_scale, sort_unique
 
 Depends: TypeAlias = Union[type[DependentVariables], DependentVariables, Sequence[DependentVariables], "Dependencies"]
 Unit = Literal["km", "m"]
@@ -160,15 +158,15 @@ class Mesoscale(Data[Array[[...], np.float_]]):
         super().__init__()
         # - descending pressure
         tropo = np.asarray(
-            sort_unique(self._arange() if troposphere is None else troposphere, descending=True), dtype=np.float_
+            utils.sort_unique(self._arange() if troposphere is None else troposphere, descending=True), dtype=np.float_
         )
-        self._levels = lvls = np.asarray(sort_unique(levels, descending=True), dtype=np.float_)
+        self._levels = lvls = np.asarray(utils.sort_unique(levels, descending=True), dtype=np.float_)
         if not all(np.isin(lvls, tropo)):
             raise ValueError(f"pressure {lvls} must be a subset of troposphere {tropo}")
 
         # - ascending scale
         mask = np.isin(tropo, lvls)
-        self._scale = scale = log_scale(tropo, rate=rate)[::-1][mask]
+        self._scale = scale = utils.log_scale(tropo, rate=rate)[::-1][mask]
         self._dx, self._dy = scale[np.newaxis] * np.array([[dx], [dy or dx]])
         self._units: DimensionsMapType[str] = {(X, Y): xy_units, Z: z_units}
 
@@ -255,7 +253,7 @@ class Mesoscale(Data[Array[[...], np.float_]]):
         name = self.name
         size = self.size
         xy, z = self.unit.values()
-        return join_kv(
+        return utils.join_kv(
             f"{name}({size=}):",
             ("scale", self.scale),
             (f"levels[{z}]", self.levels),
@@ -278,9 +276,8 @@ class Mesoscale(Data[Array[[...], np.float_]]):
         width: int = 80,
         method: str = "nearest",
     ) -> ReSampler:
-        return ReSampler(
-            __x if isinstance(__x, Domain) else self.get_domain(__x), height=height, width=width, method=method
-        )
+        domain = __x if isinstance(__x, Domain) else self.get_domain(__x)
+        return ReSampler(domain, height=height, width=width, method=method)
 
     def produce(
         self,
@@ -295,26 +292,27 @@ class Mesoscale(Data[Array[[...], np.float_]]):
         resampler = self.resample(__x, height=height, width=width, method=method)
         return DataProducer(indices, resampler=resampler)
 
+    def fit(self, dsets: DatasetSequence, domain: Domain | None = None):
+        domain = domain or self.get_domain(dsets)
+
+        # def fit(self, x: AbstractDomain | Mesoscale, /) -> DatasetSequence:
+        #     domain = x if isinstance(x, AbstractDomain) else self.get_domain(x)
+        #     # TODO: need to determine the intersection of the lon,lat based on the greatest extent
+        #     # | domain.bbox.nd_intersect(ds[LON], ds[LAT])
+        return DatasetSequence(
+            ds.sel({TIME: ds[TIME].isin(domain.time), LVL: ds[LVL].isin(domain.levels)}) for ds in dsets
+        )
+
 
 # =====================================================================================================================
 class DataProducer(DataWorker[PointOverTime, Array[[Nv, Nt, Nz, Ny, Nx], np.float_]], AbstractResampler):
     def __init__(self, indices: Iterable[PointOverTime], resampler: ReSampler) -> None:
         super().__init__(indices, resampler=resampler)
 
+    # - AbstractResampler - #
     @functools.cached_property
     def resampler(self) -> ReSampler:
         return self.attrs["resampler"]
-
-    # - AbstractDomain - #
-    @property
-    def domain(self) -> Domain:
-        return self.resampler.domain
-
-    # - AbstractReSampler - #
-    def vstack(
-        self, longitude: Longitude, latitude: Latitude, time: Array[[N], np.datetime64]
-    ) -> Array[[Nz, Ny, Nx, Nv | Nt], np.float_]:
-        return self.resampler.vstack(longitude, latitude, time)
 
     # - Mapping Interface - #
     def __getitem__(self, idx: PointOverTime) -> Array[[Nv, Nt, Nz, Ny, Nx], np.float_]:
@@ -496,9 +494,9 @@ class DependentDataset(IndependentDataset):
 #  - functions
 # =====================================================================================================================
 def _open_datasets(
-    paths: CanBeItems[StrPath, Depends], *, levels: ListLike[Number] | None = None, times: Any = None
+    paths: ChainableItems[StrPath, Depends], *, levels: ListLike[Number] | None = None, times: Any = None
 ) -> Iterable[DependentDataset]:
-    for path, depends in items(paths):
+    for path, depends in utils.chain_items(paths):
         ds = DependentDataset.from_zarr(path, depends)
         if levels is not None and times is not None:
             ds = ds.sel({LVL: ds.level.isin(levels), TIME: ds.time.isin(times)})
@@ -511,6 +509,6 @@ def _open_datasets(
 
 
 def open_datasets(
-    paths: CanBeItems[StrPath, Depends], *, levels: ListLike[Number] | None = None, times: Any = None
+    paths: ChainableItems[StrPath, Depends], *, levels: ListLike[Number] | None = None, times: Any = None
 ) -> DatasetSequence:
     return DatasetSequence(_open_datasets(paths, levels=levels, times=times))

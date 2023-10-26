@@ -15,10 +15,10 @@ def test_sort_unique() -> None:
 
 def test_items() -> None:
     assert (
-        list(utils.items({"a": 1, "b": 2, "c": 3}))
-        == list(utils.items([("a", 1), ("b", 2), ("c", 3)]))
-        == list(utils.items(("a", 1), ("b", 2), ("c", 3)))
-        == list(utils.items(zip("abc", (1, 2, 3))))
+        list(utils.chain_items({"a": 1, "b": 2, "c": 3}))
+        == list(utils.chain_items([("a", 1), ("b", 2), ("c", 3)]))
+        == list(utils.chain_items(("a", 1), ("b", 2), ("c", 3)))
+        == list(utils.chain_items(zip("abc", (1, 2, 3))))
         == [("a", 1), ("b", 2), ("c", 3)]
     )
 

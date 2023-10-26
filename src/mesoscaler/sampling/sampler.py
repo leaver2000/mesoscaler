@@ -1,13 +1,44 @@
 from __future__ import annotations
 
 import abc
+import functools
 import itertools
 
 import numpy as np
 
 from .. import utils
-from .._typing import AreaExtent, Array, Iterator, N, Nx, Ny, Point, PointOverTime
-from .domain import Domain, DomainIntersectionSampler
+from .._typing import (
+    Any,
+    AreaExtent,
+    Array,
+    Callable,
+    Iterator,
+    N,
+    Nx,
+    Ny,
+    Point,
+    PointOverTime,
+    Self,
+    TypeVar,
+)
+from ..generic import DataSampler
+from .domain import AbstractDomain, Domain
+
+_T = TypeVar("_T")
+
+
+class DomainIntersectionSampler(DataSampler[_T], AbstractDomain, abc.ABC):
+    @property
+    def domain(self) -> Domain:
+        return self._domain
+
+    def __init__(self, domain: Domain) -> None:
+        super().__init__()
+        self._domain = domain
+
+    @classmethod
+    def partial(cls, *args: Any, **kwargs: Any) -> Callable[[Domain], Self]:
+        return functools.partial(cls, *args, **kwargs)
 
 
 class TimeAndPointSampler(DomainIntersectionSampler[PointOverTime], abc.ABC):

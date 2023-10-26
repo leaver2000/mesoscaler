@@ -5,6 +5,12 @@ representation of longitude, latitude, time, and an optional Isobaric
 vertical dimension. If the data does not contain a vertical dimension it is
 assumed to be a derivate of the atmosphere.
 
+## Installation
+
+```bash
+pip install .
+```
+
 ## Strict xarray dataset coordinate and dimension conventions
 
 A concrete dimension and coordinate convention is used to ensure that the

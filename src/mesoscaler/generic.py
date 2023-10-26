@@ -220,6 +220,15 @@ class DataWorker(NamedAndSized, Mapping[HashableT, _T1], abc.ABC):
         return self
 
 
+from . import utils
+from ._typing import Array, ArrayLike, N, NumpyGeneric_T
+
+
+class DataUnion(DataMapping[HashableT, Array[[N], NumpyGeneric_T]]):
+    def __init__(self, data: Mapping[HashableT, Iterable[ArrayLike[NumpyGeneric_T]]]) -> None:
+        super().__init__({key: utils.nd_union(value) for key, value in data.items()})
+
+
 # =====================================================================================================================
 # - DataGenerator
 # =====================================================================================================================

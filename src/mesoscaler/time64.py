@@ -11,10 +11,10 @@ import numpy as np
 
 from . import utils
 from ._metadata import VariableEnum, auto_field
-from ._typing import Any, Array, Literal, N, TypeAlias, Union, overload
+from ._typing import Any, Array, Literal, N, Slice, TypeAlias, Union, overload
 
 DateTimeValue: TypeAlias = datetime.date | datetime.datetime | np.datetime64 | str
-TimeDeltaValue: TypeAlias = datetime.timedelta | np.timedelta64 | int | float
+TimeDeltaValue: TypeAlias = datetime.timedelta | np.timedelta64 | int
 Datetime64UnitLiteral: TypeAlias = Literal[
     "datetime64[Y]",
     "datetime64[M]",
@@ -122,13 +122,13 @@ class Time64(str, VariableEnum):
         idx = ~isinstance(x, (datetime.date, datetime.datetime, np.datetime64, str))
         return np.dtype(self.aliases[idx])
 
-    def delta(self, value: int | datetime.timedelta | np.timedelta64) -> np.timedelta64:
+    def delta(self, value: TimeDeltaValue) -> np.timedelta64:
         return np.timedelta64(value, self)
 
     @overload
     def datetime(
         self,
-        __x: int | datetime.datetime | np.datetime64 | str | None = None,
+        __x: int | datetime.date | datetime.datetime | np.datetime64 | str | None = None,
     ) -> np.datetime64:
         ...
 
@@ -147,7 +147,9 @@ class Time64(str, VariableEnum):
     ) -> np.datetime64:
         ...
 
-    def datetime(self, __x: int | datetime.datetime | np.datetime64 | str | None = None, *args: Any) -> np.datetime64:
+    def datetime(
+        self, __x: int | datetime.date | datetime.datetime | np.datetime64 | str | None = None, *args: Any
+    ) -> np.datetime64:
         if args and isinstance(__x, int):
             __x = datetime.datetime(__x, *args)
         return np.datetime64(__x, self)
@@ -239,6 +241,17 @@ class Time64(str, VariableEnum):
                 ['2022-01-31T00', '2022-01-31T06', '2022-01-31T12', '2022-01-31T18']], dtype='datetime64[h]')
         """
         return utils.batch(self.arange(start, stop, step), size, strict=True)
+
+    def __getitem__(
+        self, item: DateTimeValue | Slice[DateTimeValue | TimeDeltaValue | None]
+    ) -> Slice[np.datetime64 | np.timedelta64 | None]:
+        if isinstance(item, slice):
+            return slice(
+                self.datetime(item.start) if item.start is not None else None,
+                self.datetime(item.stop) if item.stop is not None else None,
+                self.delta(item.step) if item.step is not None else None,
+            )
+        return slice(None, self.datetime(item))  # type: ignore
 
 
 del _auto_time

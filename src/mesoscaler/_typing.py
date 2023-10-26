@@ -94,6 +94,7 @@ import numpy as np
 import pandas as pd
 import xarray as xr
 from numpy._typing._nested_sequence import _NestedSequence as NestedSequence
+from numpy.typing import NDArray
 
 if sys.version_info <= (3, 9):
     from typing_extensions import ParamSpec, Self, TypeAlias, TypeVarTuple, Unpack
@@ -133,7 +134,7 @@ Undefined = enum.Enum("Undefined", names="_", module=__name__)
 
 # =====================================================================================================================
 
-NumpyGeneric_T = TypeVar("NumpyGeneric_T", bound=np.generic, covariant=True)
+NumpyGeneric_T = TypeVar("NumpyGeneric_T", bound=np.generic | Any)
 NumpyDType_T = TypeVar("NumpyDType_T", bound=np.dtype[Any])
 NumpyNumber_T = TypeVar("NumpyNumber_T", bound=np.number[Any])
 
@@ -150,7 +151,7 @@ DictStrAny: TypeAlias = DictStr[Any]
 StrPath: TypeAlias = "str | os.PathLike[str]"
 Method: TypeAlias = Callable[Concatenate[_T, _P], _T_co]
 ClassMethod: TypeAlias = Callable[Concatenate[type[_T], _P], _T_co]
-CanBeItems: TypeAlias = Mapping[_T, _T_co] | list[tuple[_T, _T_co]]
+ChainableItems: TypeAlias = Mapping[_T, _T_co] | list[tuple[_T, _T_co]] | Iterator[tuple[_T, _T_co]]
 
 # - numpy
 Int: TypeAlias = int | np.integer[Any]
@@ -214,7 +215,6 @@ class Shaped(Sized, Protocol):
 
 Array: TypeAlias = np.ndarray[Nd[_P], np.dtype[NumpyGeneric_T]]
 """>>> x: Array[[int, int], np.int_] = np.array([[1, 2, 3]]) # Array[(int, int), int]"""
-NDArray: TypeAlias = Array[[...], NumpyGeneric_T]
 List: TypeAlias = list[_T | Any]
 TensorLike: TypeAlias = Union[Array[_P, _T_co], NDArray[_T_co]]
 
