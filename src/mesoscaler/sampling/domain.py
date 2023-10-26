@@ -19,31 +19,15 @@ from .._typing import (
     Iterator,
     N,
     NamedTuple,
-    Sequence,
 )
-from ..enums import (
-    LAT,
-    LON,
-    LVL,
-    TIME,
-    Coordinates,
-    Dimensions,
-    DimensionsMapType,
-    X,
-    Y,
-    Z,
-)
-from ..generic import DataSequence, Mapping
+from ..enums import LAT, LON, LVL, TIME, Dimensions, X, Y
+from ..generic import DataSequence
 
 if TYPE_CHECKING:
     from ..core import DependentDataset, Mesoscale
 else:
     Mesoscale = Any
     DependentDataset = Any
-
-
-UNITS: DimensionsMapType[tuple[str, ...]] = {(X, Y): ("km", "m"), Z: ("hPa",)}
-DatasetAndExtent = tuple[DependentDataset, AreaExtent]
 
 
 class BoundingBox(NamedTuple):
@@ -134,14 +118,6 @@ class DatasetSequence(DataSequence[DependentDataset]):
     def _repr_html_(self) -> str:
         return "\n".join(ds._repr_html_() for ds in self)
 
-    # def sel(self, time=None, levels=None) -> DatasetSequence:
-    #     keys = []  # type: list[tuple[str, Any]]
-    #     if time is not None:
-    #         keys.append((TIME, time))
-    #     if levels is not None:
-    #         keys.append((LVL, levels))
-    #     return DatasetSequence(ds.sel({key: ds[key].isin(value)}) for ds in self for key, value in keys)
-
 
 class AbstractDomain(abc.ABC):
     @property
@@ -150,9 +126,26 @@ class AbstractDomain(abc.ABC):
         ...
 
     @property
+    def scale(self) -> Mesoscale:
+        return self.domain._scale
+
+    @property  # - T
+    def time(self) -> Array[[N], np.datetime64]:
+        return self.domain._time
+
+    @property  # - Z
+    def levels(self) -> Array[[N], np.float_]:
+        return self.domain._levels
+
+    @property  # - YX
     def bbox(self) -> BoundingBox:
         return self.domain._bbox
 
+    @property
+    def datasets(self) -> DatasetSequence:
+        return self.domain._datasets
+
+    # - Extent
     @property
     def min_lon(self) -> float:
         return self.bbox.west
@@ -169,31 +162,12 @@ class AbstractDomain(abc.ABC):
     def max_lat(self) -> float:
         return self.bbox.north
 
-    x0, y0, x1, y1 = min_lon, min_lat, max_lon, max_lat
-
-    # - AreaExtent -
     @property
-    def area_extents(self) -> Array[[N, N4], np.float_]:
+    def area_extent(self) -> Array[[N, N4], np.float_]:
         return self.scale.to_numpy(units="m")
 
-    @property
-    def time(self) -> Array[[N], np.datetime64]:
-        return self.domain._time
-
-    @property
-    def levels(self) -> Array[[N], np.float_]:
-        return self.domain._levels
-
-    @property
-    def dvars(self) -> Array[[N, N], np.str_]:
-        return self.domain._dvars
-
-    @property
-    def datasets(self) -> DatasetSequence:
-        return self.domain._datasets
-
-    def iter_dataset_and_extent(self) -> Iterator[DatasetAndExtent]:
-        return zip(self.datasets, self.area_extents)
+    def iter_dataset_and_extent(self) -> Iterator[tuple[DependentDataset, AreaExtent]]:
+        return zip(self.datasets, self.area_extent)
 
     def _repr_args(self):
         return (
@@ -202,102 +176,60 @@ class AbstractDomain(abc.ABC):
             ("scale", "\n" + textwrap.indent(utils.repr_(self.scale), "  ")),
         )
 
-    @property
-    def scale(self) -> Mesoscale:
-        return self.domain._scale
-
-    def get_extents(self, units: str = "m") -> Array[[N, N4], np.float_]:
-        if units not in UNITS[X, Y]:
-            raise ValueError(f"units must be one of {UNITS[X, Y]}")
-
-        extents = self.area_extents
-        if units != self.scale.unit[X, Y]:
-            if units == "km":
-                extents /= 1000.0
-            elif units == "m":
-                extents *= 1000.0
-
-        return extents
-
-    def fit(self, __x: Iterable[DependentDataset]) -> DatasetSequence:
-        return DatasetSequence(
-            ds.sel({LVL: [lvl]}).set_grid_definition(grid)
-            for lvl in self.levels
-            for (ds, grid) in ((ds, ds.get_grid_definition()) for ds in __x)
-            if lvl in ds.level
-        )
-
-    def batch(self, x: Mapping[Coordinates, Iterable[Sequence[float | np.datetime64]]]) -> DatasetSequence:
-        return DatasetSequence(
-            ds.select_from({k: batch}) for ds in self.datasets for k, batcher in x.items() for batch in batcher
-        )
-
 
 class Domain(AbstractDomain):
+    __slots__ = ("_scale", "_time", "_levels", "_bbox", "_datasets")
+    _scale: Mesoscale
+    _time: Array[[N], np.datetime64]
+    _levels: Array[[N], np.float_]
+    _bbox: BoundingBox
+    _datasets: DatasetSequence
+
     @property
     def domain(self) -> Domain:
         return self
 
-    def __init__(self, datasets: Iterable[DependentDataset], scale: Mesoscale) -> None:
-        (
-            self._bbox,
-            self._time,
-            self._levels,
-            self._dvars,
-            self._area_extents,
-            self._datasets,
-            self._scale,
-        ) = _get_intersection(datasets, scale)
+    def __init__(self, dsets: Iterable[DependentDataset], scale: Mesoscale) -> None:
+        self._scale = scale
+        dsets = DatasetSequence(dsets) if not isinstance(dsets, DatasetSequence) else dsets
+
+        # - Z
+        levels = utils.nd_union(dsets.get_levels(), sort=True)
+        self._levels = levels = levels[np.isin(levels, scale.levels, assume_unique=True)][::-1]  # descending,
+
+        # - T
+        self._time = time = utils.nd_intersect(dsets.get_time(), sort=True)
+
+        # - XY
+        (x0, x1) = _min_max(dsets.get_longitude())
+        (y0, y1) = _min_max(dsets.get_latitude())
+        self._bbox = BoundingBox(x0, y0, x1, y1)
+        self._datasets = DatasetSequence(self._fit(dsets, time, levels))
+
         super().__init__()
 
-        self._datasets = self.fit(self._datasets)
-
     def __repr__(self) -> str:
-        chain_items = self._repr_args()
-        return utils.join_kv("Domain:", *chain_items)
+        items = self._repr_args()
+        return utils.join_kv("Domain:", *items)
+
+    @staticmethod
+    def _fit(
+        dsets: Iterable[DependentDataset], time: Array[[N], np.datetime64], levels: Array[[N], np.float_]
+    ) -> Iterable[DependentDataset]:
+        dsets = (ds.sel({TIME: ds.time.isin(time)}) for ds in dsets)
+        for ds in dsets:
+            grid = ds.get_grid_definition()
+            for lvl in levels:
+                if lvl in ds.level:
+                    yield ds.sel({LVL: [lvl]}).set_grid_definition(grid)
+
+    def fit(self, dsets: Iterable[DependentDataset], /) -> DatasetSequence:
+        return DatasetSequence(self._fit(dsets, self.time, self.levels))
 
 
 # =====================================================================================================================
 # - core functions for determining the domain of datasets
 # =====================================================================================================================
-
-
-def _get_intersection(
-    dsets: Iterable[DependentDataset], scale: Mesoscale
-) -> tuple[
-    BoundingBox,
-    Array[[N], np.datetime64],
-    Array[[N], np.float_],
-    Array[[N, N], np.str_],
-    Array[[N, N4], np.float_],
-    DatasetSequence,
-    Mesoscale,
-]:
-    dsets = DatasetSequence(dsets)
-    # coords = dsets.get_coordinates()
-
-    # - Z
-    levels = utils.nd_union(dsets.get_levels(), sort=True)
-    levels = levels[np.isin(levels, scale.levels, assume_unique=True)][::-1]  # descending,
-
-    # - T
-    time = utils.nd_intersect(dsets.get_time(), sort=True)
-    dsets = DatasetSequence(ds.sel({TIME: ds.time.isin(time)}) for ds in dsets)
-
-    # - XY
-    (x0, x1) = _min_max(dsets.get_longitude())
-    (y0, y1) = _min_max(dsets.get_latitude())
-
-    return (
-        BoundingBox(x0, y0, x1, y1),
-        # np.s_[min_time:max_time],
-        time,
-        levels,
-        np.stack([list(ds.data_vars) for ds in dsets]),
-        scale.area_extent * 1000.0,  # km -> m
-        dsets,
-        scale,
-    )
 
 
 def _min_max(arr: list[Array[[N, N], np.float_]]) -> tuple[float, float]:

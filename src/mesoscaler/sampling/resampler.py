@@ -93,9 +93,10 @@ class AbstractResampler(AbstractDomain, abc.ABC):
             data,
             dims=(_VARIABLES, T, Z, Y, X),
             coords={
-                _VARIABLES: self.dvars[0],
+                # TODO: in order to set x and y we need to scale the extent
+                # _VARIABLES: self.dvars[0],
                 LVL: (LVL.axis, self.levels),
-                # TIME: (TIME.axis, self.slice_time(time)),
+                TIME: (TIME.axis, time),
             },
         )
 
@@ -153,6 +154,7 @@ class ReSampler(AbstractResampler):
             projection={"proj": self.proj, "lon_0": longitude, "lat_0": latitude},
         )
 
+    # -
     def zstack(
         self, longitude: Longitude, latitude: Latitude, time: Array[[N], np.datetime64]
     ) -> Array[[Nz, Ny, Nx, Nv | Nt], np.float_]:

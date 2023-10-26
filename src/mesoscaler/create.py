@@ -197,8 +197,8 @@ def resampler(
     width: int = DEFAULT_WIDTH,
     method: str = DEFAULT_RESAMPLE_METHOD,
 ) -> ReSampler:
+    dsets = _open_datasets(dsets, levels=levels)
     scale = Mesoscale.arange(dx, dy, start, stop, step, p0=p0, p1=p1, rate=rate, levels=levels)
-    dsets = scale.fit(_open_datasets(dsets, levels=levels))
     return scale.resample(dsets, height=height, width=width, method=method)
 
 
