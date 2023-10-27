@@ -46,6 +46,8 @@ from .utils import (
     nd_union,
     normalize,
     pair,
+    quads,
+    triples,
 )
 
 __all__ = [
@@ -84,6 +86,8 @@ __all__ = [
     # - utils -
     "utils",
     "pair",
+    "triples",
+    "quads",
     "is_pair",
     "iter_pair",
     "batch",

@@ -146,6 +146,9 @@ HashableT = TypeVar("HashableT", bound=Hashable)
 
 # - builtins
 Pair: TypeAlias = tuple[_T, _T]
+Trips: TypeAlias = tuple[_T, _T, _T]
+Quad: TypeAlias = tuple[_T, _T, _T, _T]
+
 DictStr: TypeAlias = dict[str, _T]
 DictStrAny: TypeAlias = DictStr[Any]
 StrPath: TypeAlias = "str | os.PathLike[str]"
