@@ -395,12 +395,12 @@ def _get_resample_method(
         nprocs=nprocs,
         segments=segments,
     )
-    if method == "nearest":
-        func = pyresample.kd_tree.resample_nearest
-
-    elif method == "gauss":
+    if method == "gauss":
         func = pyresample.kd_tree.resample_gauss
         kwargs |= dict(sigmas=sigmas, with_uncert=with_uncert, neighbours=neighbors, epsilon=epsilon)
+    elif method == "nearest":
+        func = pyresample.kd_tree.resample_nearest
+
     else:
         raise ValueError(f"method {method} is not supported!")
     return functools.partial(func, **kwargs)
