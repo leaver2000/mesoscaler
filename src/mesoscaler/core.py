@@ -2,15 +2,21 @@ from __future__ import annotations
 
 import functools
 import html
+from typing import Callable
 
 import numpy as np
 import pandas as pd
 import pyproj
 import xarray as xr
 import xarray.core.formatting_html
+import zarr
 from pyresample.geometry import GridDefinition
 from xarray.core.coordinates import DatasetCoordinates
 
+try:
+    from tqdm import tqdm
+except ImportError:
+    tqdm = list
 try:
     import matplotlib.pyplot as _plt
 except ImportError:
@@ -546,3 +552,89 @@ def open_datasets(
     paths: ChainableItems[StrPath, Depends], *, levels: ListLike[Number] | None = None, times: Any = None
 ) -> DatasetSequence:
     return DatasetSequence(_open_datasets(paths, levels=levels, times=times))
+
+
+def write_zarr(
+    path: StrPath,
+    scale: Mesoscale,
+    datasets: Iterable[DependentDataset],
+    *,
+    sampler: AreaOfInterestSampler
+    | Callable[..., AreaOfInterestSampler] = (
+        #
+        functools.partial(AreaOfInterestSampler, aoi=(-120.0, 55.0, -75.0, 30.0), lon_lat_steps=5, num_time=1)
+    ),
+    height: int = 40,
+    width: int = 80,
+    target_protection: Literal["laea", "lcc"] = "laea",
+) -> None:
+    n_channels: int | None = None
+
+    for ds in datasets:
+        if n_channels is None:
+            n_channels = len(ds.data_vars)
+        else:
+            assert n_channels == len(ds.data_vars), "All datasets must have the same number of channels"
+    assert n_channels is not None, "No datasets provided"
+
+    domain = scale.get_domain(datasets)
+
+    if callable(sampler):
+        sampler = sampler(domain)
+
+    resampler = ReSampler(domain, height=height, width=width, method="nearest")
+
+    store = zarr.DirectoryStore(path)
+    root = zarr.group(store=store)
+    shape = (len(sampler), n_channels, sampler.num_time, len(scale.levels), height, width)
+    # - Chunk size and shape
+    # In general, chunks of at least 1 megabyte (1M)
+    # uncompressed size seem to provide better performance,
+    # at least when using the Blosc compression library.
+
+    # The optimal chunk shape will depend on how you want to access the data.
+    # E.g., for a 2-dimensional array, if you only ever take slices along the
+    # first dimension, then chunk across the second dimension.
+    # If you know you want to chunk across an entire dimension you can
+    # use None or -1 within the chunks argument, e.g.:
+    # z1 = zarr.zeros((10000, 10000), chunks=(100, None), dtype='i4')
+    # z1.chunks
+    # (100, 10000)
+    g = root.create_dataset(
+        "train",
+        shape=shape,
+        # the arrays will be loaded as the 6 dimensional array
+        # (sampler, channel, time, level, height, width)
+        chunks=(1, None, None, None, None, None),
+        dtype=np.float32,
+    )
+    g.attrs["shape"] = shape
+    g.attrs["projection"] = target_protection
+    g.attrs["time_period"] = (
+        np.array([domain.time.min(), domain.time.max()]).astype("datetime64[h]").astype(str).tolist()
+    )
+    g.attrs["area_of_interest"] = sampler.aoi
+    g.attrs["height"] = height
+    g.attrs["width"] = width
+    g.attrs["scaling"] = [
+        {
+            "scale": scl,
+            "level": lvl,
+            "extent": ext,
+        }
+        for lvl, ext, scl in zip(scale.levels.tolist(), scale.to_numpy().tolist(), scale.scale.tolist())
+    ]
+    metadata = []
+
+    for (lon, lat), time in tqdm(iter(sampler)):
+        x = resampler(lon, lat, time)
+        g.append(x[np.newaxis, ...])
+
+        metadata.append(
+            {
+                "longitude": lon,
+                "latitude": lat,
+                "time": time.astype("datetime64[h]").astype(str).tolist(),
+            }
+        )
+        g.attrs["metadata"] = metadata

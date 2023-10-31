@@ -3,11 +3,13 @@ from __future__ import annotations
 import abc
 import dataclasses
 import functools
+import os
 
 import numpy as np
 import pyproj
 import pyresample.geometry
 import xarray as xr
+import zarr
 from pyresample.geometry import AreaDefinition, GridDefinition
 
 from .._typing import (
@@ -30,11 +32,14 @@ from .._typing import (
 )
 from ..enums import LVL, TIME, T, X, Y, Z
 from .domain import AbstractDomain, Domain
+from .sampler import AreaOfInterestSampler
 
 if TYPE_CHECKING:
     import cartopy.crs as ccrs
     import matplotlib.pyplot as plt
     from cartopy.mpl.geoaxes import GeoAxes
+
+
 try:
     import cartopy.crs as ccrs
     import matplotlib.pyplot as plt
@@ -102,6 +107,33 @@ class AbstractResampler(AbstractDomain, abc.ABC):
 
     def get_dataset(self, longitude: Longitude, latitude: Latitude, time: Array[[N], np.datetime64]) -> xr.Dataset:
         return self.get_array(longitude, latitude, time).to_dataset(_VARIABLES)
+
+    def get_metadata(self, sampler: AreaOfInterestSampler):
+        scaling = [
+            {
+                "scale": scl,
+                "level": lvl,
+                "extent": ext,
+            }
+            for lvl, ext, scl in zip(self.levels.tolist(), self.scale.to_numpy().tolist(), self.scale.scale.tolist())
+        ]
+        return {
+            "projection": self.proj,
+            # "shape": (self.NV, self.num_time, self.NZ, self.height, self.width),
+            "time_period": np.array([self.time.min(), self.time.max()]).astype("datetime64[h]").tolist(),
+            "area_of_interest": sampler.aoi,
+            "height": self.height,
+            "width": self.width,
+            "scaling": scaling,
+            "coordinates": [
+                {
+                    "longitude": lon,
+                    "latitude": lat,
+                    "time": time.astype("datetime64[h]").tolist(),
+                }
+                for (lon, lat), time in sampler
+            ],
+        }
 
 
 class ReSampler(AbstractResampler):
@@ -185,6 +217,35 @@ class ReSampler(AbstractResampler):
     def plot(self) -> functools.partial[SamplePlotter]:
         return functools.partial(SamplePlotter, self)
 
+    def write_zarr(
+        self,
+        longitude: Longitude,
+        latitude: Latitude,
+        time: Array[[N], np.datetime64],
+        path: str,
+        *,
+        mode: Literal["w", "a", "auto"] = "auto",
+    ) -> None:
+        if mode == "auto":
+            mode = "w" if not os.path.exists(path) else "a"
+        elif mode == "a" and not os.path.exists(path):
+            raise ValueError(f"mode {mode} requires the file to exist!")
+        elif mode == "w" and os.path.exists(path):
+            raise ValueError(f"mode {mode} requires the file to not exist!")
+        elif mode not in ("w", "a"):
+            raise ValueError(f"mode {mode} is not supported!")
+
+        x = self(longitude, latitude, time)
+
+        if mode == "w":
+            g = zarr.open_array(path, mode="w", shape=x.shape, chunks=True, dtype=x.dtype)
+            g[:] = x
+        elif mode == "a":
+            g = zarr.open_array(path, mode="a")
+            g.append(x)
+        else:
+            raise ValueError(f"mode {mode} is not supported!")
+
 
 @dataclasses.dataclass
 class PlotOption:
@@ -263,6 +324,168 @@ class SamplePlotter(AbstractResampler):
     ) -> SamplePlotter:
         """Create a new BatchPlotter with the same resampler and batch data, but with a different center."""
         return self.resampler.plot(longitude, latitude, time, **(self._config | kwargs))
+
+    # =================================================================================================================
+    def gcf(self, figsize=(10, 10)):
+        if self._fig is None:
+            self._fig = plt.figure(figsize=figsize)
+        return self._fig
+
+    def level(
+        self, t_dim: int, z_dim: int, options: list[PlotOption], ax: GeoAxes, show_inner_domains: bool = True
+    ) -> None:
+        area_def = self._area_defs[z_dim]
+        x, y = area_def.get_lonlats()
+
+        if show_inner_domains:
+            for ad in self._area_defs[:z_dim]:
+                self._plot_inner_domain(ax, *ad.get_lonlats())
+
+        if self.grid_lines:
+            ax.gridlines()
+        if self.coast_lines:
+            ax.coastlines()
+
+        for feature in self.features:
+            ax.add_feature(feature)
+
+        ax.plot(
+            x,
+            y,
+            marker="x",
+            color="r",
+            linewidth=1,
+        )
+
+        if self.levels is not None:
+            lvl = self.levels[z_dim]
+            ax.set_title(f"Level: {lvl}")
+        for opt in options:
+            self._plot_options[opt.kind](ax, x, y, t_dim, z_dim, opt)
+
+    def all_levels(
+        self, t_dim: int, options: list[PlotOption], size: int = 10, show_inner_domains: bool = True
+    ) -> None:
+        ratio = self.width / self.height
+        fig = self.gcf(figsize=(size, (size / ratio) * self.NZ))
+        fig.tight_layout()
+
+        it = [
+            (z, fig.add_subplot(self.NZ, 1, self.NZ - z, projection=area_def.to_cartopy_crs()))
+            for z, area_def in enumerate(self._area_defs)
+        ]
+        for z_dim, ax in it:
+            self.level(t_dim, z_dim, ax=ax, options=options, show_inner_domains=show_inner_domains)  # type: ignore
+
+    # =================================================================================================================
+    def _barbs(
+        self,
+        ax: GeoAxes,
+        x: Array[[Ny, Nx], np.float_],
+        y: Array[[Ny, Nx], np.float_],
+        t_dim: int,
+        z_dim: int,
+        opt: PlotOption,
+    ) -> None:
+        u, v = self.sample[opt.dim, t_dim, z_dim, :, :]
+        ax.barbs(x, y, u, v, length=4, transform=self.transform, sizes=dict(emptybarb=0.01), alpha=opt.alpha)
+
+    def _contour(
+        self,
+        ax: GeoAxes,
+        x: Array[[Ny, Nx], np.float_],
+        y: Array[[Ny, Nx], np.float_],
+        t_dim: int,
+        z_dim: int,
+        opt: PlotOption,
+    ) -> None:
+        z = self.sample[opt.dim, t_dim, z_dim, :, :]
+        ax.contour(
+            x,
+            y,
+            z,
+            transform=self.transform,
+            colors=opt.colors,
+            alpha=opt.alpha,
+            linewidths=opt.linewidths,
+            linestyles=opt.linestyles,
+        )
+
+    def _contourf(
+        self,
+        ax: GeoAxes,
+        x: Array[[Ny, Nx], np.float_],
+        y: Array[[Ny, Nx], np.float_],
+        t_dim: int,
+        z_dim: int,
+        opt: PlotOption,
+    ) -> None:
+        z = self.sample[opt.dim, t_dim, z_dim, :, :]
+        ax.contourf(x, y, z, transform=self.transform, alpha=opt.alpha, cmap=opt.cmap)
+
+    def _plot_inner_domain(self, ax: GeoAxes, x: Array, y: Array) -> None:
+        x0, y0 = x[0, 0], y[0, 0]
+        x1, y1 = x[-1, -1], y[-1, -1]
+        ax.plot(
+            [x0, x1, x1, x0, x0],
+            [y0, y0, y1, y1, y0],
+            color="purple",
+            linewidth=1,
+            transform=self.transform,
+            linestyle="-.",
+        )
+
+
+class DataPlotter(AbstractDomain):
+    def __init__(
+        self,
+        sample: Array[[Nv, Nt, Nz, Ny, Nx], np.float_],
+        area_definitions: list[AreaDefinition],
+        center: tuple[Longitude, Latitude],
+        width: int = 80,
+        height: int = 80,
+        /,
+        *,
+        transform: ccrs.Projection | None = None,
+        features: list = [],
+        grid_lines: bool = True,
+        coast_lines: bool = True,
+    ) -> None:
+        if not has_cartopy:
+            raise ImportError("cartopy is not installed")
+        super().__init__()
+        # self._resampler = resampler
+        self.sample = sample
+        self.shape = self.NV, self.NT, self.NZ, self.NY, self.NX = sample.shape
+        self.center = center
+        self._area_defs = area_definitions
+        self.width = width
+        self.height = height
+
+        self._plot_options = {"contour": self._contour, "barbs": self._barbs, "contourf": self._contourf}
+        self._config = {
+            "grid_lines": grid_lines,
+            "coast_lines": coast_lines,
+            "transform": transform or ccrs.PlateCarree(),
+            "features": features,
+        }
+        self._fig = None
+
+    @property
+    def features(self) -> list:
+        return self._config["features"]
+
+    @property
+    def transform(self) -> ccrs.Projection:
+        return self._config["transform"]
+
+    @property
+    def grid_lines(self) -> bool:
+        return self._config["grid_lines"]
+
+    @property
+    def coast_lines(self) -> bool:
+        return self._config["coast_lines"]
 
     # =================================================================================================================
     def gcf(self, figsize=(10, 10)):

@@ -9,7 +9,6 @@ import numpy as np
 from .. import utils
 from .._typing import (
     Any,
-    AreaExtent,
     Array,
     Callable,
     Iterator,
