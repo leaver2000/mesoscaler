@@ -153,7 +153,7 @@ class ReSampler(AbstractResampler):
         width: int = 80,
         method: str = "nearest",
         sigmas=[1.0],
-        radius_of_influence: int = 500000,
+        radius_of_influence: int = 500_000,
         fill_value: int = 0,
         target_protection: Literal["laea", "lcc"] = "laea",
         reduce_data: bool = True,
@@ -259,19 +259,17 @@ class PlotOption:
     alpha: float = 1.0
 
 
-class SamplePlotter(AbstractResampler):
-    @property
-    def resampler(self) -> ReSampler:
-        return self._resampler
-
+class PlotArray:
     def __init__(
         self,
-        resampler: ReSampler,
         longitude: Longitude,
         latitude: Latitude,
         time: Array[[N], np.datetime64],
-        /,
-        *,
+        sample: Array[[Nv, Nt, Nz, Ny, Nx], np.float_],
+        width: int,
+        height: int,
+        levels: list[float],
+        area_definitions: list[AreaDefinition],
         transform: ccrs.Projection | None = None,
         features: list = [],
         grid_lines: bool = True,
@@ -280,19 +278,14 @@ class SamplePlotter(AbstractResampler):
         if not has_cartopy:
             raise ImportError("cartopy is not installed")
         super().__init__()
-        self._resampler = resampler
-        self.sample = sample = self.resampler(longitude, latitude, time)
+        self.sample = sample
         self.shape = self.NV, self.NT, self.NZ, self.NY, self.NX = sample.shape
         self.center = (longitude, latitude)
-        self._area_defs = [
-            _area_definition(
-                self.width,
-                self.height,
-                {"proj": self.proj, "lon_0": longitude, "lat_0": latitude, "units": "m"},
-                area_extent=self.area_extent[z],
-            )
-            for z in range(self.NZ)
-        ]
+        self.levels = levels
+        self.width = width
+        self.height = height
+        self.time = time
+        self._area_defs = area_definitions
 
         self._plot_options = {"contour": self._contour, "barbs": self._barbs, "contourf": self._contourf}
         self._config = {
@@ -596,6 +589,57 @@ class DataPlotter(AbstractDomain):
             transform=self.transform,
             linestyle="-.",
         )
+
+
+class SamplePlotter(PlotArray, AbstractResampler):
+    @property
+    def resampler(self) -> ReSampler:
+        return self._resampler
+
+    def __init__(
+        self,
+        resampler: ReSampler,
+        longitude: Longitude,
+        latitude: Latitude,
+        time: Array[[N], np.datetime64],
+        /,
+        *,
+        transform: ccrs.Projection | None = None,
+        features: list = [],
+        grid_lines: bool = True,
+        coast_lines: bool = True,
+    ) -> None:
+        self._resampler = resampler
+        AbstractResampler.__init__(self)
+        PlotArray.__init__(
+            self,
+            longitude,
+            latitude,
+            time,
+            self.resampler(longitude, latitude, time),
+            self.resampler.width,
+            self.resampler.height,
+            self.resampler.levels.tolist(),
+            [
+                _area_definition(
+                    self.width,
+                    self.height,
+                    {"proj": self.proj, "lon_0": longitude, "lat_0": latitude, "units": "m"},
+                    area_extent=self.area_extent[z],
+                )
+                for z in range(self.NZ)
+            ],
+            transform=transform,
+            features=features,
+            grid_lines=grid_lines,
+            coast_lines=coast_lines,
+        )
+
+    def __call__(
+        self, longitude: Longitude, latitude: Latitude, time: Array[[N], np.datetime64], **kwargs
+    ) -> SamplePlotter:
+        """Create a new BatchPlotter with the same resampler and batch data, but with a different center."""
+        return self.resampler.plot(longitude, latitude, time, **(self._config | kwargs))
 
 
 def _get_resample_method(
