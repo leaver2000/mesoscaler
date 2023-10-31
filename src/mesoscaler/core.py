@@ -59,6 +59,7 @@ from .enums import (
 from .generic import Data, DataWorker
 from .sampling.domain import DatasetSequence, Domain
 from .sampling.resampler import AbstractResampler, ReSampler
+from .sampling.sampler import AreaOfInterestSampler, LinearSampler
 
 Depends: TypeAlias = Union[type[DependentVariables], DependentVariables, Sequence[DependentVariables], "Dependencies"]
 
@@ -276,6 +277,17 @@ class Mesoscale(Data[Array[[...], np.float_]]):
 
     def get_domain(self, dsets: Iterable[DependentDataset]) -> Domain:
         return Domain(dsets, self)
+
+    def get_sampler(
+        self,
+        dsets: Iterable[DependentDataset],
+        aoi: tuple[float, float, float, float] | None = None,
+        lon_lat_steps: int = 5,
+        num_time: int = 1,
+    ) -> AreaOfInterestSampler | LinearSampler:
+        if aoi is None:
+            return LinearSampler(self.get_domain(dsets), lon_lat_steps=lon_lat_steps, num_time=num_time)
+        return AreaOfInterestSampler(self.get_domain(dsets), aoi=aoi, lon_lat_steps=lon_lat_steps, num_time=num_time)
 
     def resample(
         self,

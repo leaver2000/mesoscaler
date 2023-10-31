@@ -136,15 +136,15 @@ class TimeSampler(AbstractSampler):
         self,
         datasets: Iterable[DependentDataset],
         time_frequency: TimeFrequencyLike = TimeFrequency("hour"),
-        time_step: int = 1,
+        time_steps: int = 1,
     ) -> None:
         super().__init__(Intersection.create_from_datasets(datasets))
         self.time_frequency = TimeFrequency(time_frequency)
-        self.time_step = time_step
+        self.time_steps = time_steps
 
     @property
     def timedelta64(self) -> np.timedelta64:
-        return self.time_frequency.timedelta(self.time_step)
+        return self.time_frequency.timedelta(self.time_steps)
 
     def get_time(self) -> Array[[N], np.datetime64]:
         return self.date_range(step=self.timedelta64)
@@ -166,15 +166,15 @@ class LinearSampler(TimeSampler):
     def __init__(
         self,
         datasets: Iterable[DependentDataset],
-        lon_lat_frequency: int = 100,
+        lon_lat_steps: int = 100,
         time_frequency: TimeFrequencyLike = "h",
-        time_step: int = 1,
+        time_steps: int = 1,
     ) -> None:
-        super().__init__(datasets, time_frequency=time_frequency, time_step=time_step)
-        self.lon_lat_frequency = lon_lat_frequency
+        super().__init__(datasets, time_frequency=time_frequency, time_steps=time_steps)
+        self.lon_lat_steps = lon_lat_steps
 
     def get_lon_lats(self) -> tuple[Array[[N], np.float_], Array[[N], np.float_]]:
-        frequency = self.lon_lat_frequency
+        frequency = self.lon_lat_steps
         return (
             self.domain.linspace("lon", frequency=frequency),
             self.domain.linspace("lat", frequency=frequency),
@@ -187,18 +187,18 @@ class ExtentBoundLinearSampler(TimeSampler):
     def __init__(
         self,
         datasets: Iterable[DependentDataset],
-        lon_lat_frequency: int = 100,
+        lon_lat_steps: int = 100,
         time_frequency: TimeFrequencyLike = TimeFrequency("hour"),
-        time_step: int = 1,
+        time_steps: int = 1,
         *,
         area_extent: tuple[float, float, float, float] | AreaExtent,
     ) -> None:
-        super().__init__(datasets, time_frequency=time_frequency, time_step=time_step)
+        super().__init__(datasets, time_frequency=time_frequency, time_steps=time_steps)
         self.area_extent = area_extent
-        self.lon_lat_frequency = lon_lat_frequency
+        self.lon_lat_steps = lon_lat_steps
 
     def get_lon_lats(self) -> tuple[Array[[N], np.float_], Array[[N], np.float_]]:
-        frequency = self.lon_lat_frequency
+        frequency = self.lon_lat_steps
         x_min, y_min, x_max, y_max = self.area_extent
         if self.domain.min_lat > y_min or self.domain.max_lat < y_max:
             raise ValueError(f"area_extent latitude bounds {y_min, y_max} are outside dataset bounds")

@@ -37,7 +37,7 @@ def create_data(
 
 
 @pytest.mark.parametrize(
-    "enum,dx,dy,height,width,time_batch_size,levels,area_of_interest",
+    "enum,dx,dy,height,width,num_time,levels,area_of_interest",
     [
         (DS1Vars, 200, 200, 80, 80, 2, [1000, 900, 800, 700, 600, 500, 400, 300, 200, 100], (-120, 30, -70, 25)),
         (DS1Vars, 200, 150, 80, 15, 4, [1000, 900, 800, 700, 600], (-120, 30, -70, 25)),
@@ -51,7 +51,7 @@ def test_resampler(
     dy: int,
     height: int,
     width: int,
-    time_batch_size: int,
+    num_time: int,
     levels: list[int],
     area_of_interest: tuple[int, ...],
 ) -> None:
@@ -60,7 +60,7 @@ def test_resampler(
 
     producer = ms.create.producer(
         dsets,
-        ms.AreaOfInterestSampler.partial(aoi=area_of_interest, time_batch_size=time_batch_size),
+        ms.AreaOfInterestSampler.partial(aoi=area_of_interest, num_time=num_time),
         height=height,
         width=width,
         dx=dx,
@@ -74,7 +74,7 @@ def test_resampler(
         assert isinstance(x, np.ndarray)
         assert x.ndim == 5
         assert x.dtype == np.float_
-        assert x.shape == (len(members), time_batch_size, len(levels), height, width)
+        assert x.shape == (len(members), num_time, len(levels), height, width)
         for j, member in enumerate(members, 1):
             v = num * j
             assert np.all(x[j - 1] == v)
