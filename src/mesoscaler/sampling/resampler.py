@@ -228,7 +228,7 @@ class SamplePlotter(AbstractResampler):
                 self.width,
                 self.height,
                 {"proj": self.proj, "lon_0": longitude, "lat_0": latitude, "units": "m"},
-                area_extent=self.area_extents[z],
+                area_extent=self.area_extent[z],
             )
             for z in range(self.NZ)
         ]

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import itertools
 
+import pytest
+
 import src.mesoscaler.utils as utils
 
 
@@ -30,3 +32,24 @@ def test_is_pair() -> None:
 
     assert utils.is_pair((1, "a"), strict=False)
     assert not utils.is_pair((1, "a"), strict=True)
+
+
+def test_pair() -> None:
+    assert utils.pair(1) == (1, 1)
+    assert utils.pair((1, 2)) == (1, 2)
+    with pytest.raises(ValueError):
+        utils.pair((1, 2, 3))
+
+
+def test_triples() -> None:
+    assert utils.triples(1) == (1, 1, 1)
+    assert utils.triples((1, 2, 3)) == (1, 2, 3)
+    with pytest.raises(ValueError):
+        utils.triples((1, 2))
+
+
+def test_quads() -> None:
+    assert utils.quads(1) == (1, 1, 1, 1)
+    assert utils.quads((1, 2, 3, 4)) == (1, 2, 3, 4)
+    with pytest.raises(ValueError):
+        utils.quads((1, 2, 3))

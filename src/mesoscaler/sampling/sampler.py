@@ -121,7 +121,11 @@ class LinearSampler(TimeSampler):
 
     def get_lon_lats(self) -> tuple[Array[[N], np.float_], Array[[N], np.float_]]:
         frequency = self.lon_lat_frequency
-        return (self.linspace("lon", frequency=frequency), self.linspace("lat", frequency=frequency))
+        lon, lat = np.linspace(self.min_lon, self.max_lon, frequency), np.linspace(
+            self.min_lat, self.max_lat, frequency
+        )
+        return lon, lat
+        # return (self.linspace("lon", frequency=frequency), self.linspace("lat", frequency=frequency))
 
 
 class AreaOfInterestSampler(TimeSampler):

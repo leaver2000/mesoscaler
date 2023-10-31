@@ -5,6 +5,7 @@ import functools
 import itertools
 import json
 import types
+import typing
 import urllib.parse
 from collections.abc import Sequence
 
@@ -22,6 +23,7 @@ except (NameError, ImportError):
 
 
 from ._typing import (
+    TYPE_CHECKING,
     Any,
     Array,
     ArrayLike,
@@ -42,11 +44,13 @@ from ._typing import (
     NumpyGeneric_T,
     NumpyNumber_T,
     Pair,
+    Quad,
     Self,
     Sequence,
     Sized,
     StrPath,
     TimeSlice,
+    Trips,
     TypeGuard,
     TypeVar,
     overload,
@@ -64,28 +68,8 @@ _T2 = TypeVar("_T2")
 # =====================================================================================================================
 # - logic
 # =====================================================================================================================
-def is_ipython() -> bool:
-    try:
-        get_ipython  # type: ignore
-        return True
-    except NameError:
-        return False
-
-
 def has_attrs(x: Any, *attrs: str) -> bool:
     return all(hasattr(x, attr) for attr in attrs)
-
-
-def is_sequence(x: Any) -> TypeGuard[Sequence]:
-    return not isinstance(x, (str, bytes)) and has_attrs(x, "__len__", "__iter__")
-
-
-def is_function(x: Any) -> TypeGuard[function]:
-    return isinstance(x, types.FunctionType)
-
-
-def is_scalar(x: Any) -> TypeGuard[np.generic | bool | int | float | complex | str | bytes | memoryview | enum.Enum]:
-    return np.isscalar(x) or isinstance(x, enum.Enum)
 
 
 def is_named_tuple(x: Any) -> TypeGuard[NamedTuple]:
@@ -98,6 +82,47 @@ def is_pair(x: Any, strict: bool = False) -> TypeGuard[Pair[Any]]:
         y, z = x
         condition &= type(y) == type(z)
     return condition
+
+
+if TYPE_CHECKING:
+
+    def pair(x: Pair[_T1] | _T1, /) -> Pair[_T1]:
+        ...
+
+    def triples(x: Trips[_T1] | _T1, /) -> Trips[_T1]:
+        ...
+
+    def quads(x: Quad[_T1] | _T1, /) -> Quad[_T1]:
+        ...
+
+else:
+
+    def _fixed_tuple(n: int):
+        def parse(x: Any):
+            if isinstance(x, Iterable) and not isinstance(x, str):
+                t = tuple(x)
+                if len(t) != n:
+                    raise ValueError(f"invalid tuple: {t}")
+                return t
+            return tuple(itertools.repeat(x, n))
+
+        return parse
+
+    pair = _fixed_tuple(2)
+    triples = _fixed_tuple(3)
+    quads = _fixed_tuple(4)
+
+
+def iter_pair(x: Pair[_T1] | Iterable[Pair[_T1]], /) -> Iterator[Pair[_T1]]:
+    if is_pair(x):
+        yield x
+    elif isinstance(x, Iterable):
+        if isinstance(x, str):
+            yield x, x  # type: ignore
+        else:
+            yield from typing.cast(Iterable[Pair[_T1]], x)
+    else:
+        raise TypeError(f"invalid pair: {x}")
 
 
 # =====================================================================================================================
@@ -200,10 +225,10 @@ def nd_intersect(__x: Iterable[ArrayLike[NumpyGeneric_T]], /, *, sort: bool = Fa
     >>> x = ms.hours.batch("2022-01-01", "2023-01-02", 3, size=4)
     >>> y = ms.hours.batch("2023-01-01", "2023-02-01", 3, size=4)
     >>> z = ms.hours.batch("2023-01-01", "2023-03-01", 3, size=4)
-    >>> ms.utils.nd_intersect([x, y, z], sort=True)
+    >>> ms.nd_intersect([x, y, z], sort=True)
     array(['2023-01-01T00', '2023-01-01T03', '2023-01-01T06', '2023-01-01T09',
-       '2023-01-01T12', '2023-01-01T15', '2023-01-01T18', '2023-01-01T21'],
-      dtype='datetime64[h]')
+           '2023-01-01T12', '2023-01-01T15', '2023-01-01T18', '2023-01-01T21'],
+            dtype='datetime64[h]')
     """
     x = np.asarray(functools.reduce(np.intersect1d, __x))
     if sort:
@@ -354,13 +379,6 @@ acc_size: SizedIterFunc[Iterable[int]] = lambda x: itertools.accumulate(map_size
 max_size: SizedIterFunc[int] = lambda x: max(map_size(x))
 min_size: SizedIterFunc[int] = lambda x: min(map_size(x))
 sum_size: SizedIterFunc[int] = lambda x: sum(map_size(x))
-
-
-def iter_pair(x: Pair[Any] | Iterable[Pair[Any]]) -> Iterator[Pair[Any]]:
-    if is_pair(x):
-        yield x
-    else:
-        yield from x
 
 
 @overload

@@ -33,6 +33,22 @@ from .time64 import (
     seconds,
     years,
 )
+from .utils import (
+    batch,
+    dump_json,
+    dump_toml,
+    is_pair,
+    iter_jsonl,
+    iter_pair,
+    load_json,
+    load_toml,
+    nd_intersect,
+    nd_union,
+    normalize,
+    pair,
+    quads,
+    triples,
+)
 
 __all__ = [
     # - core -
@@ -69,6 +85,20 @@ __all__ = [
     "auto_field",
     # - utils -
     "utils",
+    "pair",
+    "triples",
+    "quads",
+    "is_pair",
+    "iter_pair",
+    "batch",
+    "normalize",
+    "nd_union",
+    "nd_intersect",
+    "dump_toml",
+    "load_toml",
+    "dump_json",
+    "load_json",
+    "iter_jsonl",
     # - create -
     "create",
     # - time64 -
