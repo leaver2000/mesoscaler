@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import functools
 import html
-from typing import Callable
+from typing import Callable, Iterator
 
 import numpy as np
 import pandas as pd
@@ -530,6 +530,101 @@ class DependentDataset(IndependentDataset):
         return xarray.core.formatting_html._obj_repr(self, header_components, sections)
 
 
+class ResamplingPipeline(
+    Iterable[Array[[Nv, Nt, Nz, Ny, Nx], np.float_]],
+):
+    def __init__(
+        self,
+        dsets: DatasetSequence,
+        resampler: ReSampler,
+        sampler: AreaOfInterestSampler,
+    ) -> None:
+        super().__init__()
+        self._dsets = dsets
+        self._resampler = resampler
+        self._sampler = sampler
+
+    def __iter__(self) -> Iterator[Array[[Nv, Nt, Nz, Ny, Nx], np.float_]]:
+        for (lon, lat), time in self._sampler:
+            yield self._resampler(lon, lat, time)
+
+    @property
+    def shape(self) -> tuple[int, int, int, int, int, int]:
+        num_chans = len(self._dsets[0].data_vars)
+        s = self._sampler
+        return (
+            len(s),  # - B
+            num_chans,  # - C
+            s.num_time,  # - T
+            len(s.scale.levels), # - Z
+            self._resampler.height, # - Y
+            self._resampler.width, 
+        )
+
+    def write(self, path: str) -> None:
+        resampler = self._resampler
+        sampler = self._sampler
+        shape = self.shape
+        aoi = self._sampler.aoi
+        domain = resampler.domain
+        height = resampler.height
+        width = resampler.width
+        scale = resampler.scale
+
+        store = zarr.DirectoryStore(path)
+        root = zarr.group(store=store)
+        # - Chunk size and shape
+        # In general, chunks of at least 1 megabyte (1M)
+        # uncompressed size seem to provide better performance,
+        # at least when using the Blosc compression library.
+
+        # The optimal chunk shape will depend on how you want to access the data.
+        # E.g., for a 2-dimensional array, if you only ever take slices along the
+        # first dimension, then chunk across the second dimension.
+        # If you know you want to chunk across an entire dimension you can
+        # use None or -1 within the chunks argument, e.g.:
+        # z1 = zarr.zeros((10000, 10000), chunks=(100, None), dtype='i4')
+        # z1.chunks
+        # (100, 10000)
+        g = root.create_dataset(
+            "train",
+            shape=shape,
+            # the arrays will be loaded as the 6 dimensional array
+            # (sampler, channel, time, level, height, width)
+            chunks=(1, None, None, None, None, None),
+            dtype=np.float32,
+        )
+        g.attrs["shape"] = shape
+        g.attrs["projection"] = resampler.proj
+        g.attrs["time_period"] = (
+            np.array([domain.time.min(), domain.time.max()]).astype("datetime64[h]").astype(str).tolist()
+        )
+        g.attrs["area_of_interest"] = aoi
+        g.attrs["height"] = height
+        g.attrs["width"] = width
+        g.attrs["scaling"] = [
+            {
+                "scale": scl,
+                "level": lvl,
+                "extent": ext,
+            }
+            for lvl, ext, scl in zip(scale.levels.tolist(), scale.to_numpy().tolist(), scale.scale.tolist())
+        ]
+        metadata = []
+        for (lon, lat), time in tqdm(iter(sampler)):
+            x = resampler(lon, lat, time)
+            g.append(x[np.newaxis, ...])
+
+            metadata.append(
+                {
+                    "longitude": lon,
+                    "latitude": lat,
+                    "time": time.astype("datetime64[h]").astype(str).tolist(),
+                }
+            )
+            g.attrs["metadata"] = metadata
+
+
 # =====================================================================================================================
 #  - functions
 # =====================================================================================================================
@@ -581,7 +676,7 @@ def write_zarr(
 
     if callable(sampler):
         sampler = sampler(domain)
-
+    assert isinstance(sampler, AreaOfInterestSampler)
     resampler = ReSampler(domain, height=height, width=width, method="nearest")
 
     store = zarr.DirectoryStore(path)
@@ -625,7 +720,6 @@ def write_zarr(
         for lvl, ext, scl in zip(scale.levels.tolist(), scale.to_numpy().tolist(), scale.scale.tolist())
     ]
     metadata = []
-
     for (lon, lat), time in tqdm(iter(sampler)):
         x = resampler(lon, lat, time)
         g.append(x[np.newaxis, ...])

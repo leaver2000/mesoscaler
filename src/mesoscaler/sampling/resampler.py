@@ -312,12 +312,6 @@ class PlotArray:
     def coast_lines(self) -> bool:
         return self._config["coast_lines"]
 
-    def __call__(
-        self, longitude: Longitude, latitude: Latitude, time: Array[[N], np.datetime64], **kwargs
-    ) -> SamplePlotter:
-        """Create a new BatchPlotter with the same resampler and batch data, but with a different center."""
-        return self.resampler.plot(longitude, latitude, time, **(self._config | kwargs))
-
     # =================================================================================================================
     def gcf(self, figsize=(10, 10)):
         if self._fig is None:
@@ -644,10 +638,10 @@ class SamplePlotter(PlotArray, AbstractResampler):
 
 def _get_resample_method(
     method: str,
-    radius_of_influence=100_000,
-    fill_value=0,
-    reduce_data=True,
-    nprocs=1,
+    radius_of_influence: int = 100_000,
+    fill_value: int = 0,
+    reduce_data: bool = True,
+    nprocs: int = 1,
     segments=None,
     # - gauss -
     sigmas=[1.0],
@@ -677,7 +671,7 @@ def _area_definition(
     width: float,
     height: float,
     projection: pyproj.CRS | dict[str, Any],
-    area_extent: Array[[N4], np.float_] | Sequence,
+    area_extent: Array[[N4], np.float_] | Sequence[float],
     lons: Array[[...], np.float_] | None = None,
     lats: Array[[...], np.float_] | None = None,
     dtype: Any = np.float_,
