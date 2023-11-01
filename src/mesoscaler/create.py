@@ -52,7 +52,7 @@ from .enums import LAT, LON, LVL, TIME, Coordinates, DependentVariables, T, X, Y
 from .generic import DataGenerator
 from .sampling.domain import DatasetSequence, Domain
 from .sampling.resampler import ReSampler
-from .sampling.sampler import LinearSampler
+from .sampling.sampler import AreaOfInterestSampler
 
 CoordinateValue: TypeAlias = (
     ListLike[float | np.datetime64 | datetime.datetime | str] | ArrayLike[np.float_ | np.datetime64]
@@ -199,12 +199,12 @@ def resampler(
 ) -> ReSampler:
     dsets = _open_datasets(dsets, levels=levels)
     scale = Mesoscale.arange(dx, dy, start, stop, step, p0=p0, p1=p1, rate=rate, levels=levels)
-    return scale.resample(dsets, height=height, width=width, method=method)
+    return scale.create_resampler(dsets, height=height, width=width, method=method)
 
 
 def producer(
     dsets: Iterable[DependentDataset] | ChainableItems[StrPath, Depends],
-    indices: Iterable[PointOverTime] | Callable[[Domain], Iterable[PointOverTime]] = LinearSampler,
+    indices: Iterable[PointOverTime] | Callable[[Domain], Iterable[PointOverTime]] = AreaOfInterestSampler,
     *,
     dx: float = DEFAULT_DX,
     dy: float | None = None,
@@ -248,7 +248,7 @@ def producer(
 
 def generator(
     dsets: Iterable[DependentDataset] | ChainableItems[StrPath, Depends],
-    indices: Iterable[PointOverTime] | Callable[[Domain], Iterable[PointOverTime]] = LinearSampler,
+    indices: Iterable[PointOverTime] | Callable[[Domain], Iterable[PointOverTime]] = AreaOfInterestSampler,
     *,
     dx: float = DEFAULT_DX,
     dy: float | None = None,
@@ -293,7 +293,7 @@ def generator(
 
 def loader(
     dsets: Iterable[DependentDataset] | ChainableItems[StrPath, Depends],
-    indices: Iterable[PointOverTime] | Callable[[Domain], Iterable[PointOverTime]] = LinearSampler,
+    indices: Iterable[PointOverTime] | Callable[[Domain], Iterable[PointOverTime]] = AreaOfInterestSampler,
     *,
     dx: float = DEFAULT_DX,
     dy: float | None = None,
@@ -321,7 +321,7 @@ def loader(
     drop_last: bool = False,
     **sampler_kwargs: Any,
 ) -> _compat.DataLoader[Array[[Nv, Nt, Nz, Ny, Nx], np.float_]]:
-    if not _compat._has_torch:
+    if not _compat.has_torch:
         raise RuntimeError("torch is not installed!")
     data_generator = generator(
         dsets,

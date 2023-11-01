@@ -2,14 +2,12 @@ from __future__ import annotations
 
 import functools
 import html
-from typing import Callable, Iterator
 
 import numpy as np
 import pandas as pd
 import pyproj
 import xarray as xr
 import xarray.core.formatting_html
-import zarr
 from pyresample.geometry import GridDefinition
 from xarray.core.coordinates import DatasetCoordinates
 
@@ -47,6 +45,7 @@ from ._typing import (
     StrPath,
     TypeAlias,
     Union,
+    overload,
 )
 from .enums import (
     DIMENSIONS,
@@ -64,8 +63,17 @@ from .enums import (
 )
 from .generic import Data, DataWorker
 from .sampling.domain import DatasetSequence, Domain
-from .sampling.resampler import AbstractResampler, ReSampler
-from .sampling.sampler import AreaOfInterestSampler, LinearSampler
+from .sampling.resampler import (
+    AbstractResampler,
+    ReSampler,
+    ResamplingPipeline,
+    SamplerT,
+)
+from .sampling.sampler import (
+    AreaOfInterestSampler,
+    MultiPointSampler,
+    TimeAndPointSampler,
+)
 
 Depends: TypeAlias = Union[type[DependentVariables], DependentVariables, Sequence[DependentVariables], "Dependencies"]
 
@@ -284,18 +292,7 @@ class Mesoscale(Data[Array[[...], np.float_]]):
     def get_domain(self, dsets: Iterable[DependentDataset]) -> Domain:
         return Domain(dsets, self)
 
-    def get_sampler(
-        self,
-        dsets: Iterable[DependentDataset],
-        aoi: tuple[float, float, float, float] | None = None,
-        lon_lat_steps: int = 5,
-        num_time: int = 1,
-    ) -> AreaOfInterestSampler | LinearSampler:
-        if aoi is None:
-            return LinearSampler(self.get_domain(dsets), lon_lat_steps=lon_lat_steps, num_time=num_time)
-        return AreaOfInterestSampler(self.get_domain(dsets), aoi=aoi, lon_lat_steps=lon_lat_steps, num_time=num_time)
-
-    def resample(
+    def create_resampler(
         self,
         __x: Domain | Iterable[DependentDataset],
         /,
@@ -307,6 +304,66 @@ class Mesoscale(Data[Array[[...], np.float_]]):
         domain = __x if isinstance(__x, Domain) else self.get_domain(__x)
         return ReSampler(domain, height=height, width=width, method=method)
 
+    @overload
+    def create_pipeline(
+        self,
+        __x: Domain | Iterable[DependentDataset],
+        /,
+        *points: tuple[float, float],
+        height: int = ...,
+        width: int = ...,
+        method: str = ...,
+        time_step: int = ...,
+    ) -> ResamplingPipeline[MultiPointSampler]:
+        ...
+
+    @overload
+    def create_pipeline(
+        self,
+        __x: Domain | Iterable[DependentDataset],
+        /,
+        *,
+        sampler: SamplerT,
+        height: int = ...,
+        width: int = ...,
+        method: str = ...,
+    ) -> ResamplingPipeline[SamplerT]:
+        ...
+
+    @overload
+    def create_pipeline(
+        self,
+        __x: Domain | Iterable[DependentDataset],
+        /,
+        *,
+        height: int = ...,
+        width: int = ...,
+        method: str = ...,
+        aoi: tuple[float, float, float, float] | None = ...,
+        lon_lat_step: int = ...,
+        padding: tuple[float, float] | float | None = ...,
+    ) -> ResamplingPipeline[AreaOfInterestSampler]:
+        ...
+
+    def create_pipeline(
+        self,
+        __x: Domain | Iterable[DependentDataset],
+        /,
+        *points: tuple[float, float],
+        height: int = 80,
+        width: int = 80,
+        method: str = "nearest",
+        time_step: int = 1,
+        sampler: TimeAndPointSampler | None = None,
+        aoi: tuple[float, float, float, float] | None = None,
+        lon_lat_step: int = 5,
+        padding: tuple[float, float] | float | None = 2.5,
+    ) -> ResamplingPipeline[Any]:
+        resampler = self.create_resampler(__x, height=height, width=width, method=method)
+        return resampler.create_pipeline(
+            sampler, *points, aoi=aoi, lon_lat_step=lon_lat_step, time_step=time_step, padding=padding
+        )
+
     def produce(
         self,
         __x: Domain | Iterable[DependentDataset],
@@ -317,7 +374,7 @@ class Mesoscale(Data[Array[[...], np.float_]]):
         width: int = 80,
         method: str = "nearest",
     ):
-        resampler = self.resample(__x, height=height, width=width, method=method)
+        resampler = self.create_resampler(__x, height=height, width=width, method=method)
         return DataProducer(indices, resampler=resampler)
 
     def plot(self) -> None:
@@ -530,101 +587,6 @@ class DependentDataset(IndependentDataset):
         return xarray.core.formatting_html._obj_repr(self, header_components, sections)
 
 
-class ResamplingPipeline(
-    Iterable[Array[[Nv, Nt, Nz, Ny, Nx], np.float_]],
-):
-    def __init__(
-        self,
-        dsets: DatasetSequence,
-        resampler: ReSampler,
-        sampler: AreaOfInterestSampler,
-    ) -> None:
-        super().__init__()
-        self._dsets = dsets
-        self._resampler = resampler
-        self._sampler = sampler
-
-    def __iter__(self) -> Iterator[Array[[Nv, Nt, Nz, Ny, Nx], np.float_]]:
-        for (lon, lat), time in self._sampler:
-            yield self._resampler(lon, lat, time)
-
-    @property
-    def shape(self) -> tuple[int, int, int, int, int, int]:
-        num_chans = len(self._dsets[0].data_vars)
-        s = self._sampler
-        return (
-            len(s),  # - B
-            num_chans,  # - C
-            s.num_time,  # - T
-            len(s.scale.levels), # - Z
-            self._resampler.height, # - Y
-            self._resampler.width, 
-        )
-
-    def write(self, path: str) -> None:
-        resampler = self._resampler
-        sampler = self._sampler
-        shape = self.shape
-        aoi = self._sampler.aoi
-        domain = resampler.domain
-        height = resampler.height
-        width = resampler.width
-        scale = resampler.scale
-
-        store = zarr.DirectoryStore(path)
-        root = zarr.group(store=store)
-        # - Chunk size and shape
-        # In general, chunks of at least 1 megabyte (1M)
-        # uncompressed size seem to provide better performance,
-        # at least when using the Blosc compression library.
-
-        # The optimal chunk shape will depend on how you want to access the data.
-        # E.g., for a 2-dimensional array, if you only ever take slices along the
-        # first dimension, then chunk across the second dimension.
-        # If you know you want to chunk across an entire dimension you can
-        # use None or -1 within the chunks argument, e.g.:
-        # z1 = zarr.zeros((10000, 10000), chunks=(100, None), dtype='i4')
-        # z1.chunks
-        # (100, 10000)
-        g = root.create_dataset(
-            "train",
-            shape=shape,
-            # the arrays will be loaded as the 6 dimensional array
-            # (sampler, channel, time, level, height, width)
-            chunks=(1, None, None, None, None, None),
-            dtype=np.float32,
-        )
-        g.attrs["shape"] = shape
-        g.attrs["projection"] = resampler.proj
-        g.attrs["time_period"] = (
-            np.array([domain.time.min(), domain.time.max()]).astype("datetime64[h]").astype(str).tolist()
-        )
-        g.attrs["area_of_interest"] = aoi
-        g.attrs["height"] = height
-        g.attrs["width"] = width
-        g.attrs["scaling"] = [
-            {
-                "scale": scl,
-                "level": lvl,
-                "extent": ext,
-            }
-            for lvl, ext, scl in zip(scale.levels.tolist(), scale.to_numpy().tolist(), scale.scale.tolist())
-        ]
-        metadata = []
-        for (lon, lat), time in tqdm(iter(sampler)):
-            x = resampler(lon, lat, time)
-            g.append(x[np.newaxis, ...])
-
-            metadata.append(
-                {
-                    "longitude": lon,
-                    "latitude": lat,
-                    "time": time.astype("datetime64[h]").astype(str).tolist(),
-                }
-            )
-            g.attrs["metadata"] = metadata
-
-
 # =====================================================================================================================
 #  - functions
 # =====================================================================================================================
@@ -647,88 +609,3 @@ def open_datasets(
     paths: ChainableItems[StrPath, Depends], *, levels: ListLike[Number] | None = None, times: Any = None
 ) -> DatasetSequence:
     return DatasetSequence(_open_datasets(paths, levels=levels, times=times))
-
-
-def write_zarr(
-    path: StrPath,
-    scale: Mesoscale,
-    datasets: Iterable[DependentDataset],
-    *,
-    sampler: AreaOfInterestSampler
-    | Callable[..., AreaOfInterestSampler] = (
-        #
-        functools.partial(AreaOfInterestSampler, aoi=(-120.0, 55.0, -75.0, 30.0), lon_lat_steps=5, num_time=1)
-    ),
-    height: int = 40,
-    width: int = 80,
-    target_protection: Literal["laea", "lcc"] = "laea",
-) -> None:
-    n_channels: int | None = None
-
-    for ds in datasets:
-        if n_channels is None:
-            n_channels = len(ds.data_vars)
-        else:
-            assert n_channels == len(ds.data_vars), "All datasets must have the same number of channels"
-    assert n_channels is not None, "No datasets provided"
-
-    domain = scale.get_domain(datasets)
-
-    if callable(sampler):
-        sampler = sampler(domain)
-    assert isinstance(sampler, AreaOfInterestSampler)
-    resampler = ReSampler(domain, height=height, width=width, method="nearest")
-
-    store = zarr.DirectoryStore(path)
-    root = zarr.group(store=store)
-    shape = (len(sampler), n_channels, sampler.num_time, len(scale.levels), height, width)
-    # - Chunk size and shape
-    # In general, chunks of at least 1 megabyte (1M)
-    # uncompressed size seem to provide better performance,
-    # at least when using the Blosc compression library.
-
-    # The optimal chunk shape will depend on how you want to access the data.
-    # E.g., for a 2-dimensional array, if you only ever take slices along the
-    # first dimension, then chunk across the second dimension.
-    # If you know you want to chunk across an entire dimension you can
-    # use None or -1 within the chunks argument, e.g.:
-    # z1 = zarr.zeros((10000, 10000), chunks=(100, None), dtype='i4')
-    # z1.chunks
-    # (100, 10000)
-    g = root.create_dataset(
-        "train",
-        shape=shape,
-        # the arrays will be loaded as the 6 dimensional array
-        # (sampler, channel, time, level, height, width)
-        chunks=(1, None, None, None, None, None),
-        dtype=np.float32,
-    )
-    g.attrs["shape"] = shape
-    g.attrs["projection"] = target_protection
-    g.attrs["time_period"] = (
-        np.array([domain.time.min(), domain.time.max()]).astype("datetime64[h]").astype(str).tolist()
-    )
-    g.attrs["area_of_interest"] = sampler.aoi
-    g.attrs["height"] = height
-    g.attrs["width"] = width
-    g.attrs["scaling"] = [
-        {
-            "scale": scl,
-            "level": lvl,
-            "extent": ext,
-        }
-        for lvl, ext, scl in zip(scale.levels.tolist(), scale.to_numpy().tolist(), scale.scale.tolist())
-    ]
-    metadata = []
-    for (lon, lat), time in tqdm(iter(sampler)):
-        x = resampler(lon, lat, time)
-        g.append(x[np.newaxis, ...])
-
-        metadata.append(
-            {
-                "longitude": lon,
-                "latitude": lat,
-                "time": time.astype("datetime64[h]").astype(str).tolist(),
-            }
-        )
-        g.attrs["metadata"] = metadata

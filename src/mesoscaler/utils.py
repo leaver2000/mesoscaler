@@ -22,7 +22,11 @@ except (NameError, ImportError):
         tqdm = None  # type: ignore
 
 
+import pyproj
+import pyresample.geometry
+
 from ._typing import (
+    N4,
     TYPE_CHECKING,
     Any,
     Array,
@@ -68,6 +72,10 @@ _T2 = TypeVar("_T2")
 # =====================================================================================================================
 # - logic
 # =====================================================================================================================
+is_integer = lambda x: isinstance(x, (int, np.integer))
+is_integer_pair = lambda x: isinstance(x, tuple) and len(x) == 2 and all(map(is_integer, x))
+
+
 def has_attrs(x: Any, *attrs: str) -> bool:
     return all(hasattr(x, attr) for attr in attrs)
 
@@ -135,9 +143,52 @@ def slice_time(t: Array[[...], np.datetime64], s: TimeSlice, /) -> Array[[N], np
     return t[(s.start <= t) & (t <= s.stop)]
 
 
+def area_definition(
+    width: float,
+    height: float,
+    projection: pyproj.CRS | dict[str, Any],
+    area_extent: Array[[N4], np.float_] | Sequence[float],
+    lons: Array[[...], np.float_] | None = None,
+    lats: Array[[...], np.float_] | None = None,
+    dtype: Any = np.float_,
+    area_id: str = "undefined",
+    description: str = "undefined",
+    proj_id: str = "undefined",
+    nprocs: int = 1,
+) -> pyresample.geometry.AreaDefinition:
+    return pyresample.geometry.AreaDefinition(
+        area_id,
+        description,
+        proj_id,
+        width=width,
+        height=height,
+        projection=projection,
+        area_extent=area_extent,
+        lons=lons,
+        lats=lats,
+        dtype=dtype,
+        nprocs=nprocs,
+    )
+
+
 # =====================================================================================================================
 # - array/tensor utils
 # =====================================================================================================================
+_ArrayOrScalerT = TypeVar("_ArrayOrScalerT", np.ndarray, float)
+
+
+def lon_180_180_to_0_360(x: _ArrayOrScalerT) -> _ArrayOrScalerT:
+    return (x - 360.0) % 360.0
+
+
+def lon_0_360_to_180_180(x: _ArrayOrScalerT) -> _ArrayOrScalerT:
+    return (x + 180.0) % 360.0 - 180.0
+
+
+long1 = lon_180_180_to_0_360
+long3 = lon_0_360_to_180_180
+
+
 def batch(x: Array[[N], NumpyGeneric_T], n: int, *, strict: bool = True) -> Array[[N, N], NumpyGeneric_T]:
     """
     >>> from src.mesoscaler import utils

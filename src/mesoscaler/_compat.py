@@ -13,17 +13,42 @@ __all__ = [
     "Sampler",
     "SequentialSampler",
     "DataLoader",
+    "tqdm",
+    "has_torch",
+    "has_cartopy",
+    "ccrs",
+    "plt",
+    "GeoAxes",
 ]
 import typing
 
 try:
     import torch  # noqa
 
-    _has_torch = True
+    has_torch = True
 except ImportError:
-    _has_torch = False
+    has_torch = False
+try:
+    from tqdm import tqdm
+except ImportError:
+    tqdm = lambda x, *_, **__: x  # noqa
 
-if _has_torch:
+
+if typing.TYPE_CHECKING:
+    import cartopy.crs as ccrs
+    import matplotlib.pyplot as plt
+    from cartopy.mpl.geoaxes import GeoAxes
+
+
+try:
+    import cartopy.crs as ccrs
+    import matplotlib.pyplot as plt
+    from cartopy.mpl.geoaxes import GeoAxes
+
+    has_cartopy = True
+except ImportError:
+    has_cartopy = False
+if has_torch:
     from torch.utils.data import (
         ChainDataset,
         ConcatDataset,
@@ -33,7 +58,8 @@ if _has_torch:
     )
     from torch.utils.data.sampler import BatchSampler, Sampler, SequentialSampler
 
-elif not _has_torch and not typing.TYPE_CHECKING:
+
+elif not has_torch and not typing.TYPE_CHECKING:
     import bisect
     import warnings
     from typing import (

@@ -1,23 +1,23 @@
 from __future__ import annotations
-import sys
+
 import os
-import mesoscaler as ms
-import zarr
+import sys
+
 import tqdm
+import zarr
+
+import mesoscaler as ms
 from src.mesoscaler.enums import (
-    # - ERA5
     GEOPOTENTIAL,
     SPECIFIC_HUMIDITY,
-    TEMPERATURE,
-    U_COMPONENT_OF_WIND,
-    V_COMPONENT_OF_WIND,
-    # - URMA
-    SURFACE_PRESSURE,
-    TEMPERATURE_2M,
     SPECIFIC_HUMIDITY_2M,
-    U_WIND_COMPONENT_10M,
-    V_WIND_COMPONENT_10M,
     SURFACE_PRESSURE,
+    TEMPERATURE,
+    TEMPERATURE_2M,
+    U_COMPONENT_OF_WIND,
+    U_WIND_COMPONENT_10M,
+    V_COMPONENT_OF_WIND,
+    V_WIND_COMPONENT_10M,
 )
 
 era5_dvars = [
@@ -56,8 +56,8 @@ def main(store: str = "data.zarr") -> int:
     width = int(height * ratio)  # px
     levels = [1013.25, 1000, 925, 850, 700, 600, 500, 400, 300, 200]
     scale = ms.Mesoscale(dx, dy, levels=levels)
-    resampler = scale.resample(dataset_sequence, width=width, height=height)
-    sampler = ms.AreaOfInterestSampler(resampler.domain, aoi=area_of_interest, num_time=3, lon_lat_steps=10)
+    resampler = scale.create_resampler(dataset_sequence, width=width, height=height)
+    sampler = ms.AreaOfInterestSampler(resampler.domain, aoi=area_of_interest, num_time=3, lon_lat_step=10)
 
     print(f"preparing to resample {len(sampler)} images and write to {store}")
     arrays = [resampler(lon, lat, time) for (lon, lat), time in tqdm.tqdm(sampler)]
