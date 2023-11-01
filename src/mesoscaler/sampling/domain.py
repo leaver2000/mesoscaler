@@ -80,23 +80,30 @@ class BoundingBox(NamedTuple):
             raise KeyError(f"key {key} is not supported!")
         return np.linspace(start, stop, frequency).round(round)
 
-    def meshgrid(self, frequency: int) -> tuple[Array[[N, N], np.float_], Array[[N, N], np.float_]]:
-        x, y = np.meshgrid(self.linspace(X, frequency=frequency), self.linspace(Y, frequency=frequency))
-        return x, y
-
-    def __array__(self) -> Array[[N4], np.float_]:
-        return np.array(self)
-
-    def to_numpy(self) -> Array[[N4], np.float_]:
-        return np.array(self)
-
     def nd_intersect(
         self, lon: AnyArrayLike[np.float_], lat: AnyArrayLike[np.float_]
     ) -> dict[Dimensions, AnyArrayLike[np.bool_]]:
-        x0, y0, x1, y1 = self
-        x0 = (x0 - 180.0) % 360 + 180.0
-        x1 = (x1 - 180.0) % 360 + 180.0
-        return {X: ((lon >= x0) & (lon <= x1)).any(axis=0), Y: ((lat >= y0) & (lat <= y1)).any(axis=1)}
+        lon_0, lat_0, lon_1, lat_1 = self
+        lon_0, lon_1 = map(utils.long1, (lon_0, lon_1))
+        return {X: ((lon >= lon_0) & (lon <= lon_1)).any(axis=0), Y: ((lat >= lat_0) & (lat <= lat_1)).any(axis=1)}
+
+    def pad(self, degs2pad: tuple[float, float]) -> BoundingBox:
+        """padding the area of interest by prevents the sampler from generating samples that may
+        on the edges of the dataset. By default this uses a 2.5 degree padding in both directions.
+
+        There is probably a better way to use the area_extent and domain to determine the required padding.
+        """
+        x, y = degs2pad
+        lon_0, lat_0, lon_1, lat_1 = self
+        lat_0 += y
+        lat_1 -= y
+
+        lon_0, lon_1 = map(utils.long1, (lon_0, lon_1))
+        lon_0 += x
+        lon_1 -= x
+        lon_0, lon_1 = map(utils.long3, (lon_0, lon_1))
+
+        return BoundingBox(lon_0, lat_0, lon_1, lat_1)
 
 
 class DatasetSequence(DataSequence[DependentDataset]):
@@ -129,21 +136,33 @@ class AbstractDomain(abc.ABC):
     def scale(self) -> Mesoscale:
         return self.domain._scale
 
+    @property
+    def datasets(self) -> DatasetSequence:
+        return self.domain._datasets
+
+    @property
+    def num_vars(self) -> int:
+        return sum(len(ds.data_vars) for ds in self.datasets)
+
     @property  # - T
-    def time(self) -> Array[[N], np.datetime64]:
-        return self.domain._time
+    def times(self) -> Array[[N], np.datetime64]:
+        return self.domain._times
+
+    @property
+    def num_times(self) -> int:
+        return len(self.times)
 
     @property  # - Z
     def levels(self) -> Array[[N], np.float_]:
         return self.domain._levels
 
+    @property
+    def num_levels(self) -> int:
+        return len(self.levels)
+
     @property  # - YX
     def bbox(self) -> BoundingBox:
         return self.domain._bbox
-
-    @property
-    def datasets(self) -> DatasetSequence:
-        return self.domain._datasets
 
     # - Extent
     @property
@@ -172,15 +191,15 @@ class AbstractDomain(abc.ABC):
     def _repr_args(self):
         return (
             ("bbox", utils.repr_(self.bbox)),
-            ("time", utils.repr_(self.time)),
+            ("time", utils.repr_(self.times)),
             ("scale", "\n" + textwrap.indent(utils.repr_(self.scale), "  ")),
         )
 
 
 class Domain(AbstractDomain):
-    __slots__ = ("_scale", "_time", "_levels", "_bbox", "_datasets")
+    __slots__ = ("_scale", "_times", "_levels", "_bbox", "_datasets")
     _scale: Mesoscale
-    _time: Array[[N], np.datetime64]
+    _times: Array[[N], np.datetime64]
     _levels: Array[[N], np.float_]
     _bbox: BoundingBox
     _datasets: DatasetSequence
@@ -198,7 +217,7 @@ class Domain(AbstractDomain):
         self._levels = levels = levels[np.isin(levels, scale.levels, assume_unique=True)][::-1]  # descending,
 
         # - T
-        self._time = time = utils.nd_intersect(dsets.get_time(), sort=True)
+        self._times = time = utils.nd_intersect(dsets.get_time(), sort=True)
 
         # - XY
         (x0, x1) = _min_max(dsets.get_longitude())
@@ -224,14 +243,10 @@ class Domain(AbstractDomain):
                     yield ds.sel({LVL: [lvl]}).set_grid_definition(grid)
 
     def fit(self, dsets: Iterable[DependentDataset], /) -> DatasetSequence:
-        return DatasetSequence(self._fit(dsets, self.time, self.levels))
+        return DatasetSequence(self._fit(dsets, self.times, self.levels))
 
 
-# =====================================================================================================================
-# - core functions for determining the domain of datasets
-# =====================================================================================================================
-
-
+# TODO: there may be a better means of doing this...
 def _min_max(arr: list[Array[[N, N], np.float_]]) -> tuple[float, float]:
     mins = []
     maxs = []

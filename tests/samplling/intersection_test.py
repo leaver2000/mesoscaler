@@ -20,7 +20,7 @@ def test_vertical_intersection(dataset_sequence: ms.DatasetSequence, scale: ms.M
 def test_temporal_intersection(dataset_sequence: ms.DatasetSequence, scale: ms.Mesoscale) -> None:
     assert dataset_sequence.size == 2
     domain = scale.get_domain(dataset_sequence)
-    assert np.all(domain.time == np.sort(np.unique(domain.time)))
+    assert np.all(domain.times == np.sort(np.unique(domain.times)))
     all_times = dataset_sequence.get_time()
     # - time_array
     time_array = np.concatenate(all_times)

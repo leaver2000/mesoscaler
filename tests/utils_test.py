@@ -53,3 +53,28 @@ def test_quads() -> None:
     assert utils.quads((1, 2, 3, 4)) == (1, 2, 3, 4)
     with pytest.raises(ValueError):
         utils.quads((1, 2, 3))
+
+
+@pytest.mark.parametrize(
+    "a,b",
+    [
+        (0, 0),
+        (360, 0),
+        (25, 25),
+        (90, 90),
+        (359, -1),
+        (180, -180),
+        (181, -179),
+        (360, 0),
+        (270, -90),
+        (271, -89),
+    ],
+)
+def test_lon_0_360_to_180_180(a, b):
+    assert utils.lon_0_360_to_180_180(a) == b == utils.long3(a)
+
+
+@pytest.mark.parametrize("a", range(0, 360))
+def test_lon_180_180_to_0_360(a):
+    b = utils.lon_0_360_to_180_180(a)
+    assert utils.lon_180_180_to_0_360(b) == a == utils.long1(b)

@@ -12,6 +12,10 @@ from pyresample.geometry import GridDefinition
 from xarray.core.coordinates import DatasetCoordinates
 
 try:
+    from tqdm import tqdm
+except ImportError:
+    tqdm = list
+try:
     import matplotlib.pyplot as _plt
 except ImportError:
     _plt = None  # type: ignore
@@ -41,6 +45,7 @@ from ._typing import (
     StrPath,
     TypeAlias,
     Union,
+    overload,
 )
 from .enums import (
     DIMENSIONS,
@@ -58,7 +63,17 @@ from .enums import (
 )
 from .generic import Data, DataWorker
 from .sampling.domain import DatasetSequence, Domain
-from .sampling.resampler import AbstractResampler, ReSampler
+from .sampling.resampler import (
+    AbstractResampler,
+    ReSampler,
+    ResamplingPipeline,
+    SamplerT,
+)
+from .sampling.sampler import (
+    AreaOfInterestSampler,
+    MultiPointSampler,
+    TimeAndPointSampler,
+)
 
 Depends: TypeAlias = Union[type[DependentVariables], DependentVariables, Sequence[DependentVariables], "Dependencies"]
 
@@ -277,7 +292,7 @@ class Mesoscale(Data[Array[[...], np.float_]]):
     def get_domain(self, dsets: Iterable[DependentDataset]) -> Domain:
         return Domain(dsets, self)
 
-    def resample(
+    def create_resampler(
         self,
         __x: Domain | Iterable[DependentDataset],
         /,
@@ -289,6 +304,66 @@ class Mesoscale(Data[Array[[...], np.float_]]):
         domain = __x if isinstance(__x, Domain) else self.get_domain(__x)
         return ReSampler(domain, height=height, width=width, method=method)
 
+    @overload
+    def create_pipeline(
+        self,
+        __x: Domain | Iterable[DependentDataset],
+        /,
+        *points: tuple[float, float],
+        height: int = ...,
+        width: int = ...,
+        method: str = ...,
+        time_step: int = ...,
+    ) -> ResamplingPipeline[MultiPointSampler]:
+        ...
+
+    @overload
+    def create_pipeline(
+        self,
+        __x: Domain | Iterable[DependentDataset],
+        /,
+        *,
+        sampler: SamplerT,
+        height: int = ...,
+        width: int = ...,
+        method: str = ...,
+    ) -> ResamplingPipeline[SamplerT]:
+        ...
+
+    @overload
+    def create_pipeline(
+        self,
+        __x: Domain | Iterable[DependentDataset],
+        /,
+        *,
+        height: int = ...,
+        width: int = ...,
+        method: str = ...,
+        aoi: tuple[float, float, float, float] | None = ...,
+        lon_lat_step: int = ...,
+        padding: tuple[float, float] | float | None = ...,
+    ) -> ResamplingPipeline[AreaOfInterestSampler]:
+        ...
+
+    def create_pipeline(
+        self,
+        __x: Domain | Iterable[DependentDataset],
+        /,
+        *points: tuple[float, float],
+        height: int = 80,
+        width: int = 80,
+        method: str = "nearest",
+        time_step: int = 1,
+        sampler: TimeAndPointSampler | None = None,
+        aoi: tuple[float, float, float, float] | None = None,
+        lon_lat_step: int = 5,
+        padding: tuple[float, float] | float | None = 2.5,
+    ) -> ResamplingPipeline[Any]:
+        resampler = self.create_resampler(__x, height=height, width=width, method=method)
+        return resampler.create_pipeline(
+            sampler, *points, aoi=aoi, lon_lat_step=lon_lat_step, time_step=time_step, padding=padding
+        )
+
     def produce(
         self,
         __x: Domain | Iterable[DependentDataset],
@@ -299,7 +374,7 @@ class Mesoscale(Data[Array[[...], np.float_]]):
         width: int = 80,
         method: str = "nearest",
     ):
-        resampler = self.resample(__x, height=height, width=width, method=method)
+        resampler = self.create_resampler(__x, height=height, width=width, method=method)
         return DataProducer(indices, resampler=resampler)
 
     def plot(self) -> None:
