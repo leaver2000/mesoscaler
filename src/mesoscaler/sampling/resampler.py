@@ -304,7 +304,7 @@ class ResamplingPipeline(Iterable[Array[[Nv, Nt, Nz, Ny, Nx], np.float_]], Abstr
 
         return data
 
-    def write_zarr(self, path: str, name: str | Mapping[str, int] = "data") -> None:
+    def write_zarr(self, path: str, name: str | Mapping[str, int] = "data", chunk_size: int = 10) -> None:
         if not isinstance(name, str):
             # TODO: add means to shuffle and write multiple groups
             raise NotImplementedError("writing multiple groups is not supported yet!")
@@ -333,8 +333,8 @@ class ResamplingPipeline(Iterable[Array[[Nv, Nt, Nz, Ny, Nx], np.float_]], Abstr
             name,
             shape=shape,
             # the arrays will be loaded as the 6 dimensional array
-            # (sampler, channel, time, level, height, width)
-            chunks=(1, None, None, None, None, None),
+            # (sample, channel, time, level, height, width)
+            chunks=(chunk_size, None, None, None, None, None),
             dtype=np.float32,
         )
         for k, v in self.attributes.items():
@@ -351,6 +351,24 @@ class ResamplingPipeline(Iterable[Array[[Nv, Nt, Nz, Ny, Nx], np.float_]], Abstr
                 }
             )
             g.attrs["metadata"] = metadata
+
+
+import dataclasses
+
+
+@dataclasses.dataclass
+class Metadata:
+    proj: Literal["laea", "lcc"]
+    height: int
+    width: int
+    time_period: list[str]
+    shape: tuple[int, int, int, int, int, int]
+    scaling: list[dict[str, Any]]
+    metadata = list[dict[str, Any]]
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> Metadata:
+        return cls(**data)
 
 
 class PlotResampler(PlotArray, AbstractResampler):
