@@ -292,11 +292,7 @@ class PlotArray:
             if len(args) > 1:
                 raise ValueError("only one attribute is allowed")
             attrs = args[0]
-            if __x.ndim == 6:
-                array = __x[__sample_idx, ...]
-            else:
-                array = __x
-
+            array = __x[__sample_idx, ...] if __x.ndim == 6 else __x
         else:
             raise ValueError("attributes must be provided if __x is not a zarr.Array")
 
