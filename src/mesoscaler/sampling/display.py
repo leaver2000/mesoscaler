@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import dataclasses
+import functools
 from typing import Callable
 
 import numpy as np
@@ -9,6 +10,7 @@ from pyresample.geometry import AreaDefinition
 
 from .. import _compat as compat, utils
 from .._typing import (
+    TYPE_CHECKING,
     Any,
     Array,
     Callable,
@@ -16,13 +18,18 @@ from .._typing import (
     Literal,
     Longitude,
     N,
+    NDArray,
     Nt,
     Nv,
     Nx,
     Ny,
     Nz,
+    overload,
 )
 from ..time64 import DateTimeValue
+
+if TYPE_CHECKING:
+    from .resampler import ZarrAttributes
 
 
 @dataclasses.dataclass
@@ -233,43 +240,90 @@ class PlotArray:
             linestyle="-.",
         )
 
+    @overload
     @classmethod
     def from_group(
         cls,
-        g: zarr.Array | zarr.Group,
-        sample_idx: int,
+        __x: zarr.Array,
+        __sample_idx: int,
+        /,
+        *,
         projection: compat.ccrs.Projection | None = None,
         features: list = [],
         grid_lines: bool = True,
         coast_lines: bool = True,
     ) -> PlotArray:
-        import functools
+        ...
 
-        array = g[sample_idx, ...]
+    @overload
+    @classmethod
+    def from_group(
+        cls,
+        __x: NDArray[np.float_],
+        __sample_idx: int,
+        __attributes: ZarrAttributes,
+        /,
+        *,
+        projection: compat.ccrs.Projection | None = None,
+        features: list = [],
+        grid_lines: bool = True,
+        coast_lines: bool = True,
+    ) -> PlotArray:
+        ...
 
-        width = g.attrs["width"]
-        height = g.attrs["height"]
-        proj = g.attrs["proj"]
+    @classmethod
+    def from_group(
+        cls,
+        __x: zarr.Array | NDArray[np.float_],
+        __sample_idx: int,
+        /,
+        *args: ZarrAttributes,
+        projection: compat.ccrs.Projection | None = None,
+        features: list = [],
+        grid_lines: bool = True,
+        coast_lines: bool = True,
+    ) -> PlotArray:
+        from .resampler import ZarrAttributes
 
-        md = g.attrs["metadata"][sample_idx]
+        if isinstance(__x, zarr.Array):
+            attrs = ZarrAttributes.from_array(__x)
+            array = __x[__sample_idx, ...]
+        elif args:
+            if len(args) > 1:
+                raise ValueError("only one attribute is allowed")
+            attrs = args[0]
+            if __x.ndim == 6:
+                array = __x[__sample_idx, ...]
+            else:
+                array = __x
+
+        else:
+            raise ValueError("attributes must be provided if __x is not a zarr.Array")
+
+        width = attrs.width
+        height = attrs.height
+        proj = attrs.proj
+        md = attrs.metadata[__sample_idx]
         longitude = md["longitude"]
         latitude = md["latitude"]
+        time = md["time"]
+
         pdef = functools.partial(
             utils.area_definition,
             width=width,
             height=height,
             projection={"proj": proj, "lon_0": longitude, "lat_0": latitude},
         )
-        scaling = sorted(g.attrs["scaling"], key=lambda x: x["level"], reverse=True)
+        scaling = sorted(attrs.scaling, key=lambda x: x["level"], reverse=True)
         extent = np.array([x["extent"] for x in scaling]) * 1000
         return PlotArray(
             array=array,  # type: ignore
             longitude=longitude,
             latitude=latitude,
-            time=md["time"],
+            time=time,
             levels=np.array([x["level"] for x in scaling]),
-            width=g.attrs["width"],
-            height=g.attrs["height"],
+            width=attrs.width,
+            height=attrs.height,
             area_definitions=[pdef(area_extent=ext) for ext in extent],
             transform=projection,
             features=features,
