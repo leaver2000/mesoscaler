@@ -19,8 +19,8 @@ from .enums import (
 )
 from .generic import DataGenerator
 from .sampling.domain import DatasetSequence, Domain
-from .sampling.resampler import ReSampler
-from .sampling.sampler import AreaOfInterestSampler, MultiPointSampler
+from .sampling.resampler import ReSampler, ResamplingPipeline, ZarrAttributes
+from .sampling.sampler import AreaOfInterestSampler, ChainSampler, MultiPointSampler
 from .time64 import (
     Time64,
     days,
@@ -62,8 +62,11 @@ __all__ = [
     # - sampling.sampling -
     "AreaOfInterestSampler",
     "MultiPointSampler",
+    "ChainSampler",
     # - sampling.resampling -
     "ReSampler",
+    "ResamplingPipeline",
+    "ZarrAttributes",
     # - sampling.intersection -
     "DatasetSequence",
     "Domain",

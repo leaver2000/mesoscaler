@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import abc
+import dataclasses
 import functools
 from typing import Callable, Generic, TypeVar
 
@@ -33,10 +34,10 @@ from .._typing import (
 from ..enums import LVL, TIME, T, X, Y, Z
 from .display import PlotArray
 from .domain import AbstractDomain, Domain
-from .sampler import AreaOfInterestSampler, MultiPointSampler, TimeAndPointSampler
+from .sampler import AreaOfInterestSampler, MultiPointSampler, PointOverTimeSampler
 
 _VARIABLES = "variables"
-SamplerT = TypeVar("SamplerT", bound=TimeAndPointSampler, contravariant=True)
+SamplerT = TypeVar("SamplerT", bound=PointOverTimeSampler, contravariant=True)
 
 
 class AbstractResampler(AbstractDomain, abc.ABC):
@@ -235,6 +236,27 @@ class ReSampler(AbstractResampler):
         )
 
 
+@dataclasses.dataclass
+class ZarrAttributes:
+    proj: Literal["laea", "lcc"]
+    height: int
+    width: int
+    time_period: list[str]
+    scaling: list[dict[str, Any]]
+    metadata: list[dict[str, Any]]
+
+    @classmethod
+    def from_array(cls, array: zarr.Array | zarr.Group) -> ZarrAttributes:
+        return ZarrAttributes(
+            proj=array.attrs["proj"],
+            height=array.attrs["height"],
+            width=array.attrs["width"],
+            time_period=array.attrs["time_period"],
+            scaling=array.attrs["scaling"],
+            metadata=array.attrs["metadata"],
+        )
+
+
 class ResamplingPipeline(Iterable[Array[[Nv, Nt, Nz, Ny, Nx], np.float_]], AbstractDomain, Generic[SamplerT]):
     @property
     def domain(self) -> Domain:
@@ -351,24 +373,6 @@ class ResamplingPipeline(Iterable[Array[[Nv, Nt, Nz, Ny, Nx], np.float_]], Abstr
                 }
             )
             g.attrs["metadata"] = metadata
-
-
-import dataclasses
-
-
-@dataclasses.dataclass
-class Metadata:
-    proj: Literal["laea", "lcc"]
-    height: int
-    width: int
-    time_period: list[str]
-    shape: tuple[int, int, int, int, int, int]
-    scaling: list[dict[str, Any]]
-    metadata = list[dict[str, Any]]
-
-    @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> Metadata:
-        return cls(**data)
 
 
 class PlotResampler(PlotArray, AbstractResampler):

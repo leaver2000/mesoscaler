@@ -239,7 +239,7 @@ AnyArrayLike: TypeAlias = Array[[...], NumpyGeneric_T] | xr.DataArray | dask.arr
 ListLike: TypeAlias = Sequence[_T_co] | Iterator[_T_co]
 AreaExtent: TypeAlias = Array[[N4], np.float_]
 """A 4-tuple of `(x_min, y_min, x_max, y_max)`"""
-Longitude: TypeAlias = float
-Latitude: TypeAlias = float
+Longitude = NewType("Longitude", float)
+Latitude = NewType("Latitude", float)
 Point: TypeAlias = tuple[Longitude, Latitude]
 PointOverTime: TypeAlias = tuple[Point, Array[[N], np.datetime64]]

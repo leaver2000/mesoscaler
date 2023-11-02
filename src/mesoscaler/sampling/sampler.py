@@ -3,6 +3,7 @@ from __future__ import annotations
 import abc
 import functools
 import itertools
+import textwrap
 
 import numpy as np
 
@@ -11,6 +12,7 @@ from .._typing import (
     Any,
     Array,
     Callable,
+    Iterable,
     Iterator,
     N,
     Nx,
@@ -18,41 +20,29 @@ from .._typing import (
     Point,
     PointOverTime,
     Self,
-    TypeVar,
 )
 from ..generic import DataSampler
 from .domain import AbstractDomain, BoundingBox, Domain
 
-_T = TypeVar("_T")
 
-
-class DomainIntersectionSampler(DataSampler[_T], AbstractDomain, abc.ABC):
-    @property
-    def domain(self) -> Domain:
-        return self._domain
-
-    def __init__(self, domain: Domain) -> None:
-        super().__init__()
-        self._domain = domain
+class PointOverTimeSampler(DataSampler[PointOverTime], AbstractDomain, abc.ABC):
+    _indices: list[PointOverTime] | None
 
     @classmethod
     def partial(cls, *args: Any, **kwargs: Any) -> Callable[[Domain], Self]:
         return functools.partial(cls, *args, **kwargs)
-
-
-class TimeAndPointSampler(DomainIntersectionSampler[PointOverTime], abc.ABC):
-    _indices: list[PointOverTime] | None
 
     @property
     def domain(self) -> Domain:
         return self._domain
 
     def __init__(self, domain: Domain, time_step: int) -> None:
-        super().__init__(domain)
+        super().__init__()
+        self._domain = domain
+        self.time_step = time_step
         self._indices = None
         self._lon_lats = None
         self._time_batches = None
-        self.time_step = time_step
 
     @property
     def time_batches(self) -> Array[[N, N], np.datetime64]:
@@ -84,8 +74,16 @@ class TimeAndPointSampler(DomainIntersectionSampler[PointOverTime], abc.ABC):
         return len(self)
 
     def __repr__(self) -> str:
-        indices = "\n".join(utils.repr_(self.indices, map_values=True))
-        return f"{type(self).__name__}[\n{indices}\n]"
+        num_samples = self.num_samples
+        if num_samples > 10:
+            indices = "\n".join(utils.repr_(self.indices[:5], map_values=True))
+            indices += "\n...\n"
+            indices += "\n".join(utils.repr_(self.indices[-5:], map_values=True))
+        else:
+            indices = "\n".join(utils.repr_(self.indices, map_values=True))
+
+        indices = textwrap.indent(indices, "    ")
+        return f"{type(self).__name__}({num_samples=})[\n{indices}\n]"
 
     # =================================================================================================================
     @abc.abstractmethod
@@ -107,32 +105,121 @@ class TimeAndPointSampler(DomainIntersectionSampler[PointOverTime], abc.ABC):
         yield from itertools.product(self.iter_points(), self.iter_time())
 
     def __iter__(self) -> Iterator[PointOverTime]:
-        yield from compat.tqdm(self.iter_indices())
+        yield from self.iter_indices()
+
+    def show(
+        self,
+        figsize: tuple[float, float] = (10, 10),
+        *,
+        fig: compat.plt.Figure | None = None,
+        projection: compat.ccrs.Projection | compat.LiteralProjection | None = None,
+        transform: compat.ccrs.Projection | None = None,
+        marker: str = "o",
+        color: str = "red",
+        linewidth: float = 1.0,
+        features: list[compat.cfeature.Feature] | None = None,
+        **kwargs: Any,
+    ) -> Self:
+        if not compat.has_cartopy:
+            raise RuntimeError("cartopy not installed!")
+
+        extents = lon_0, lat_0, lon_1, lat_1 = self._get_extent()
+
+        figsize = figsize or (10, 10)
+
+        fig = fig or compat.plt.figure(figsize=figsize)
+        if isinstance(projection, str):
+            projection = compat.get_projection(
+                projection, central_longitude=(lon_0 + lon_1) / 2, central_latitude=(lat_0 + lat_1) / 2
+            )
+
+            transform = transform or compat.ccrs.PlateCarree()
+        elif projection is None:
+            projection = compat.ccrs.PlateCarree()
+
+        transform = transform or projection
+        features = features or [compat.cfeature.STATES]
+        ax = fig.add_subplot(1, 1, 1, projection=projection)
+        assert isinstance(ax, compat.GeoAxes)
+        ax.coastlines()
+        ax.set_extent(extents, crs=transform)
+
+        for feature in features:
+            ax.add_feature(feature)
+
+        ax.scatter(
+            *zip(*self.iter_points()),
+            transform=transform,
+            marker=marker,
+            color=color,
+            linewidth=linewidth,
+            **kwargs,
+        )
+        return self
+
+    def _get_extent(self) -> list[float]:
+        return [self.min_lon, self.max_lon, self.min_lat, self.max_lat]
+
+    def chain(self, samplers: Iterable[PointOverTimeSampler]) -> ChainSampler:
+        return ChainSampler((self, *samplers))
 
 
-class MultiPointSampler(TimeAndPointSampler):
-    """`x_min, y_min, x_max, y_max = area_extent`"""
+class ChainSampler(PointOverTimeSampler):
+    def __init__(self, samplers: Iterable[PointOverTimeSampler]) -> None:
+        domain = None
+        time_step = None
+        samplers, it = itertools.tee(samplers, 2)
 
-    def __init__(self, domain: Domain, /, *points: tuple[float, float], time_step: int) -> None:
+        for s in it:
+            if domain is None:
+                domain = s.domain
+            elif domain is not s.domain:
+                raise ValueError(f"all samplers must have the same domain {domain=}")
+
+            if time_step is None:
+                time_step = s.time_step
+            elif time_step != s.time_step:
+                raise ValueError(f"all samplers must have the same time_step {time_step=}")
+
+        assert domain is not None
+        assert time_step is not None
+
         super().__init__(domain, time_step)
-        self.time_step = time_step
-        self._points = tuple(dict.fromkeys(points))
+        self._points = itertools.chain.from_iterable(s.iter_points() for s in samplers)
+
+    def iter_points(self) -> Iterator[Point]:
+        # dont consume the chain
+        it, self._points = itertools.tee(self._points, 2)
+        yield from it
 
     def get_lon_lats(self) -> tuple[Array[[N], np.float_], Array[[N], np.float_]]:
-        x, y = np.array(self._points).T
+        x, y = np.array(list(self.iter_points())).T
         return x, y
+
+
+class MultiPointSampler(PointOverTimeSampler):
+    """`x_min, y_min, x_max, y_max = area_extent`"""
+
+    def __init__(self, domain: Domain, /, *points: tuple[float, float] | Point, time_step: int) -> None:
+        super().__init__(domain, time_step)
+        self.time_step = time_step
+        self._points = utils.point_union(points)
 
     def iter_points(self) -> Iterator[Point]:
         # dont create a product of points
-        return iter(self._points)
+        yield from self._points
+
+    def get_lon_lats(self) -> tuple[Array[[N], np.float_], Array[[N], np.float_]]:
+        x, y = np.array(list(self.iter_points())).T
+        return x, y
 
 
-class AreaOfInterestSampler(TimeAndPointSampler):
+class AreaOfInterestSampler(PointOverTimeSampler):
     """`x_min, y_min, x_max, y_max = area_extent`"""
 
     @staticmethod
     def _resolve_stride(
-        stride: int | tuple[int, ...] | None, time_step: int | None, lon_lat_step: int | tuple[int, ...] | None
+        stride: int | tuple[int, ...] | None, lon_lat_step: int | tuple[int, ...] | None, time_step: int | None
     ) -> tuple[int, int, int]:
         if isinstance(stride, tuple) and len(stride) == 3:
             if lon_lat_step is not None or time_step is not None:
@@ -143,31 +230,38 @@ class AreaOfInterestSampler(TimeAndPointSampler):
                     RuntimeWarning,
                 )
             stride = stride
+        elif isinstance(stride, tuple) and len(stride) == 2:
+            xy, t = stride
+            stride = (xy, xy, t)
         elif stride is None:
             if lon_lat_step is None:
-                stride = (time_step or 1, 1, 1)
+                stride = (1, 1, time_step or 1)
             elif isinstance(lon_lat_step, tuple) and len(lon_lat_step) == 2:
-                stride = (time_step or 1, *lon_lat_step)
+                stride = (*lon_lat_step, time_step or 1)
             elif isinstance(lon_lat_step, int):
-                stride = (time_step or 1, lon_lat_step, lon_lat_step)
+                stride = (lon_lat_step, lon_lat_step, time_step or 1)
             else:
                 raise ValueError(f"stride {stride} and lon_lat_step {lon_lat_step} are not valid")
         elif isinstance(stride, int):
             if lon_lat_step is None:
-                stride = (time_step or 1, stride, stride)
+                stride = (stride, stride, time_step or 1)
             elif isinstance(lon_lat_step, tuple) and len(lon_lat_step) == 2:
-                stride = (time_step or 1, *lon_lat_step)
+                stride = (*lon_lat_step, time_step or 1)
             elif isinstance(lon_lat_step, int):
-                stride = (time_step or 1, lon_lat_step, lon_lat_step)
+                stride = (lon_lat_step, lon_lat_step, time_step or 1)
             else:
                 raise ValueError(f"stride {stride} and lon_lat_step {lon_lat_step} are not valid")
 
         elif isinstance(lon_lat_step, tuple) and len(lon_lat_step) == 2:
-            stride = (time_step or 1, *lon_lat_step)
+            stride = (*lon_lat_step, time_step or 1)
         else:
             raise ValueError(f"stride {stride} and lon_lat_step {lon_lat_step} are not valid")
 
         return stride
+
+    def _get_extent(self):
+        x0, y0, x1, y1 = self.aoi
+        return [x0, x1, y0, y1]
 
     def __init__(
         self,
@@ -176,23 +270,23 @@ class AreaOfInterestSampler(TimeAndPointSampler):
         *,
         stride: int | tuple[int, ...] | None = None,
         aoi: tuple[float, float, float, float] | None = None,
-        padding: tuple[float, float] | float | None = 2.5,
+        padding: tuple[float, float] | float | None = None,
         # - convince args
-        time_step: int | None = None,
         lon_lat_step: int | tuple[int, ...] | None = None,
+        time_step: int | None = None,
     ) -> None:
-        stride = self._resolve_stride(stride, time_step, lon_lat_step)
-        super().__init__(domain, stride[0])
+        stride = self._resolve_stride(stride, lon_lat_step, time_step)
+        super().__init__(domain, stride[-1])
         self.stride = stride
         self.aoi = BoundingBox(*(self.bbox if aoi is None else aoi))
         self.padding = (padding, padding) if padding is not None and not isinstance(padding, tuple) else padding
 
     def get_time_batches(self) -> Array[[N, N], np.datetime64]:
-        t_num = self.stride[0]
+        t_num = self.stride[-1]
         return utils.batch(self.times, t_num, strict=True).astype("datetime64[h]")
 
     def get_lon_lats(self) -> tuple[Array[[N], np.float_], Array[[N], np.float_]]:
-        _, x_num, y_num = self.stride
+        x_num, y_num = self.stride[:2]
         x_min, y_min, x_max, y_max = (
             self.aoi.pad(self.padding) if self.padding is not None else self.aoi
         )  # self._get_padded_aoi(self.padding) if self.padding else self.aoi

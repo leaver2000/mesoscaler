@@ -1,10 +1,12 @@
 # noqa
 # mypy: ignore-errors
 # pyright: reportGeneralTypeIssues=false, reportMissingImports=false
-"""torch==2.1.0 compatibility layer."""
 from __future__ import annotations
 
 __all__ = [
+    # - pytorch -
+    "has_torch",
+    "torch",
     "Dataset",
     "IterableDataset",
     "ConcatDataset",
@@ -13,25 +15,41 @@ __all__ = [
     "Sampler",
     "SequentialSampler",
     "DataLoader",
+    # - tqdm -
     "tqdm",
-    "has_torch",
+    # - matplotlib -
+    "has_matplotlib",
+    "plt",
+    # - cartopy -
     "has_cartopy",
     "ccrs",
-    "plt",
+    "cfeature",
     "GeoAxes",
 ]
+import contextlib
 import typing
 
-try:
-    import torch  # noqa
 
-    has_torch = True
-except ImportError:
-    has_torch = False
+class _dummy:
+    def __init__(self, error_message: str = "module not installed!") -> None:
+        self.error_message = error_message
+
+    def __getattr__(self, _) -> typing.NoReturn:
+        raise RuntimeError(self.error_message)
+
+    def __call__(self, *_, **__) -> typing.NoReturn:
+        raise RuntimeError(self.error_message)
+
+
 try:
     from tqdm import tqdm
+
+    with contextlib.suppress(NameError):
+        get_ipython  # type: ignore
+        from tqdm.notebook import tqdm
+
 except ImportError:
-    tqdm = lambda x, *_, **__: x  # noqa
+    tqdm = lambda x, *_, **__: iter(x)
 
 
 if typing.TYPE_CHECKING:
@@ -41,13 +59,58 @@ if typing.TYPE_CHECKING:
 
 
 try:
-    import cartopy.crs as ccrs
     import matplotlib.pyplot as plt
+
+    has_matplotlib = True
+except ImportError:
+    has_matplotlib = False
+    plt = _dummy("matplotlib not installed")
+
+
+try:
+    import cartopy.crs as ccrs
+    import cartopy.feature as cfeature
     from cartopy.mpl.geoaxes import GeoAxes
+
+    _projections = {
+        "laea": ccrs.LambertAzimuthalEqualArea,
+        "lcc": ccrs.LambertConformal,
+        "aea": ccrs.AlbersEqualArea,
+    }
+    LiteralProjection = typing.Literal[
+        "laea",
+        "lcc",
+        "aea",
+    ]
+
+    def get_projection(
+        name: LiteralProjection, central_longitude: float = 0.0, central_latitude: float = 0.0
+    ) -> ccrs.Projection:
+        proj = _projections.get(name, None)
+        if proj is None:
+            raise ValueError(f"projection {name} not found!")
+        return proj(
+            central_longitude=central_longitude,
+            central_latitude=central_latitude,
+        )
 
     has_cartopy = True
 except ImportError:
     has_cartopy = False
+    ccrs = _dummy("cartopy not installed")
+    GeoAxes = _dummy("cartopy not installed")
+    cfeature = _dummy("cartopy not installed")
+
+
+try:
+    import torch  # noqa
+
+    has_torch = True
+except ImportError:
+    has_torch = False
+    torch = _dummy("torch not installed")
+
+
 if has_torch:
     from torch.utils.data import (
         ChainDataset,
