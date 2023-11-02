@@ -197,7 +197,7 @@ class AbstractDomain(abc.ABC):
 
 
 class Domain(AbstractDomain):
-    __slots__ = ("_scale", "_times", "_levels", "_bbox", "_datasets")
+    __slots__ = ("_scale", "_times", "_levels", "_bbox", "_datasets", "_partial_defs")
     _scale: Mesoscale
     _times: Array[[N], np.datetime64]
     _levels: Array[[N], np.float_]

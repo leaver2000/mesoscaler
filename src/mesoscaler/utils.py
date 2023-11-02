@@ -10,20 +10,9 @@ import urllib.parse
 from collections.abc import Sequence
 
 import numpy as np
-import toml
-
-try:
-    get_ipython  # type: ignore
-    import tqdm.notebook as tqdm  # pyright: ignore
-except (NameError, ImportError):
-    try:
-        import tqdm  # type: ignore
-    except ImportError:
-        tqdm = None  # type: ignore
-
-
 import pyproj
 import pyresample.geometry
+import toml
 
 from ._typing import (
     N4,
@@ -48,6 +37,7 @@ from ._typing import (
     NumpyGeneric_T,
     NumpyNumber_T,
     Pair,
+    Point,
     Quad,
     Self,
     Sequence,
@@ -72,7 +62,6 @@ _T2 = TypeVar("_T2")
 # =====================================================================================================================
 # - logic
 # =====================================================================================================================
-is_integer = lambda x: isinstance(x, (int, np.integer))
 is_integer_pair = lambda x: isinstance(x, tuple) and len(x) == 2 and all(map(is_integer, x))
 
 
@@ -82,6 +71,10 @@ def has_attrs(x: Any, *attrs: str) -> bool:
 
 def is_named_tuple(x: Any) -> TypeGuard[NamedTuple]:
     return isinstance(x, tuple) and hasattr(x, "_fields")
+
+
+def is_integer(x: Any) -> TypeGuard[int | np.integer[Any]]:
+    return isinstance(x, (int, np.integer))
 
 
 def is_pair(x: Any, strict: bool = False) -> TypeGuard[Pair[Any]]:
@@ -178,7 +171,7 @@ _ArrayOrScalerT = TypeVar("_ArrayOrScalerT", np.ndarray, float)
 
 
 def lon_180_180_to_0_360(x: _ArrayOrScalerT) -> _ArrayOrScalerT:
-    return (x - 360.0) % 360.0
+    return x % 360.0
 
 
 def lon_0_360_to_180_180(x: _ArrayOrScalerT) -> _ArrayOrScalerT:
@@ -189,10 +182,33 @@ long1 = lon_180_180_to_0_360
 long3 = lon_0_360_to_180_180
 
 
+def point_union(__x: Iterable[tuple[float, float] | Point]) -> tuple[Point, ...]:
+    """
+    Returns a tuple of unique points from the input iterable.
+
+    Args:
+        __x: An iterable of tuples or Points.
+
+    Returns:
+        A tuple of unique Points.
+
+    >>> utils.point_union([(1, 2), (1, 2), (3, 5)])
+    """
+    return tuple(dict.fromkeys(__x))  # type: ignore[return-value]
+
+
 def batch(x: Array[[N], NumpyGeneric_T], n: int, *, strict: bool = True) -> Array[[N, N], NumpyGeneric_T]:
     """
-    >>> from src.mesoscaler import utils
-    >>> import numpy as np
+    Batches an array into smaller arrays of size n.
+
+    Args:
+        x (numpy.ndarray): The array to be batched.
+        n (int): The size of each batch.
+        strict (bool, optional): If True, raises a ValueError if the array size is not divisible by n. Defaults to True.
+
+    Returns:
+        numpy.ndarray: An array of shape (x.size // n, n) containing the batches.
+
     >>> a = np.arange(10)
     >>> utils.batch(a, 5)
     array([[0, 1, 2, 3, 4],
@@ -210,6 +226,7 @@ def batch(x: Array[[N], NumpyGeneric_T], n: int, *, strict: bool = True) -> Arra
            [4, 5, 6, 7],
            [8, 9, 0, 0]])
     """
+
     s = x.size
     m = s % n
     if m and strict:

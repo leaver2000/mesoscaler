@@ -11,15 +11,7 @@ import xarray.core.formatting_html
 from pyresample.geometry import GridDefinition
 from xarray.core.coordinates import DatasetCoordinates
 
-try:
-    from tqdm import tqdm
-except ImportError:
-    tqdm = list
-try:
-    import matplotlib.pyplot as _plt
-except ImportError:
-    _plt = None  # type: ignore
-from . import utils
+from . import _compat as compat, utils
 from ._typing import (
     N4,
     Any,
@@ -72,7 +64,7 @@ from .sampling.resampler import (
 from .sampling.sampler import (
     AreaOfInterestSampler,
     MultiPointSampler,
-    TimeAndPointSampler,
+    PointOverTimeSampler,
 )
 
 Depends: TypeAlias = Union[type[DependentVariables], DependentVariables, Sequence[DependentVariables], "Dependencies"]
@@ -354,7 +346,7 @@ class Mesoscale(Data[Array[[...], np.float_]]):
         width: int = 80,
         method: str = "nearest",
         time_step: int = 1,
-        sampler: TimeAndPointSampler | None = None,
+        sampler: PointOverTimeSampler | None = None,
         aoi: tuple[float, float, float, float] | None = None,
         lon_lat_step: int = 5,
         padding: tuple[float, float] | float | None = 2.5,
@@ -377,15 +369,21 @@ class Mesoscale(Data[Array[[...], np.float_]]):
         resampler = self.create_resampler(__x, height=height, width=width, method=method)
         return DataProducer(indices, resampler=resampler)
 
-    def plot(self) -> None:
-        if _plt is None:
-            raise ImportError("matplotlib is not installed")
+    def show(
+        self,
+        figsize: tuple[float, float] = (15, 6),
+        *,
+        linestyle="-",
+        linewidth: float = 0.75,
+        marker: str = ".",
+        markersize: float = 2.5,
+    ) -> None:
         X1, X2, Y = self.dx, self.dy, self.levels
-        fig = _plt.figure(figsize=(15, 6))
+        fig = compat.plt.figure(figsize=figsize)
         ax = fig.add_subplot(121)
         ax.invert_yaxis()
-        ax.plot(X1, Y, linestyle="-", linewidth=0.75, marker=".", markersize=2.5)
-        ax.plot(X2, Y, linestyle="-", linewidth=0.75, marker=".", markersize=2.5)
+        ax.plot(X1, Y, linestyle=linestyle, linewidth=linewidth, marker=marker, markersize=markersize)
+        ax.plot(X2, Y, linestyle=linestyle, linewidth=linewidth, marker=marker, markersize=markersize)
         ax.set_ylabel("Pressure (hPa)")
         ax.set_xlabel("Extent (km)")
         ax.legend(["dx", "dy"])
